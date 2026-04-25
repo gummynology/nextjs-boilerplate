@@ -6,6 +6,7 @@ const productTypes = [
   "Sachets",
   "Liquids",
   "Softgels",
+  "Tincture",
 ];
 
 const whyGummynology = [
@@ -63,7 +64,8 @@ export default function Home() {
               <p className="mt-6 max-w-2xl text-lg leading-8 text-zinc-700 sm:text-xl">
                 A verified B2B portal for supplement brands to request OEM
                 manufacturing quotes, starting with gummies and expanding to
-                capsules, tablets, powders, sachets, liquids, and softgels.
+                capsules, tablets, powders, sachets, liquids, softgels, and
+                tinctures.
               </p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                 <a
@@ -95,7 +97,7 @@ export default function Home() {
                   ["Access", "Approved only"],
                   ["Initial format", "Gummies"],
                   ["Workflow", "OEM quote"],
-                  ["Expansion", "7 formats"],
+                  ["Expansion", "8 formats"],
                 ].map(([label, value]) => (
                   <div key={label} className="bg-white p-4">
                     <dt className="text-xs font-semibold tracking-[0.16em] text-zinc-500 uppercase">
