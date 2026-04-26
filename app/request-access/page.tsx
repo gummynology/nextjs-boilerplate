@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { getSupabaseClient } from "@/lib/supabaseClient";
 
 const productInterests = [
   "Gummies",
@@ -109,6 +110,8 @@ function fieldClass(error?: string) {
 export default function RequestAccessPage() {
   const [values, setValues] = useState<FormValues>(initialValues);
   const [errors, setErrors] = useState<FormErrors>({});
+  const [submitError, setSubmitError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
   function updateField(field: keyof FormValues, value: string) {
@@ -122,15 +125,62 @@ export default function RequestAccessPage() {
       delete next[field];
       return next;
     });
+    setSubmitError("");
     setSubmitted(false);
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const nextErrors = validate(values);
     setErrors(nextErrors);
-    setSubmitted(Object.keys(nextErrors).length === 0);
+    setSubmitError("");
+    setSubmitted(false);
+
+    if (Object.keys(nextErrors).length > 0) {
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+
+    if (!supabase) {
+      setSubmitError(
+        "Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to enable submissions.",
+      );
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    const { error } = await supabase.from("access_requests").insert({
+      first_name: values.firstName.trim(),
+      last_name: values.lastName.trim(),
+      company_name: values.companyName.trim(),
+      company_website: values.companyWebsite.trim(),
+      business_email: values.businessEmail.trim(),
+      phone: values.phoneNumber.trim(),
+      address: values.address.trim(),
+      city: values.city.trim(),
+      state: values.state.trim(),
+      zip_code: values.zipCode.trim(),
+      country: values.country.trim(),
+      product_interest: values.productInterest,
+      estimated_annual_volume: values.estimatedAnnualVolume.trim(),
+      message: values.message.trim(),
+    });
+
+    setIsSubmitting(false);
+
+    if (error) {
+      setSubmitError(
+        error.message ||
+          "Unable to submit your access request. Please try again.",
+      );
+      return;
+    }
+
+    setValues(initialValues);
+    setSubmitted(true);
   }
 
   function ErrorMessage({ field }: { field: keyof FormValues }) {
@@ -138,7 +188,9 @@ export default function RequestAccessPage() {
       return null;
     }
 
-    return <p className="mt-2 text-sm font-medium text-red-700">{errors[field]}</p>;
+    return (
+      <p className="mt-2 text-sm font-medium text-red-700">{errors[field]}</p>
+    );
   }
 
   return (
@@ -184,7 +236,7 @@ export default function RequestAccessPage() {
         >
           <div className="border-b border-zinc-200 pb-6">
             <p className="text-sm font-semibold tracking-[0.18em] text-emerald-800 uppercase">
-              Phase 1 Access Request
+              Phase 2 Access Request
             </p>
             <h2 className="mt-3 text-2xl font-semibold text-zinc-950">
               Company and contact information
@@ -195,6 +247,14 @@ export default function RequestAccessPage() {
             <div className="mt-6 border border-emerald-200 bg-emerald-50 p-4">
               <p className="text-base font-semibold text-emerald-950">
                 Thank you. Your access request has been submitted for review.
+              </p>
+            </div>
+          ) : null}
+
+          {submitError ? (
+            <div className="mt-6 border border-red-200 bg-red-50 p-4">
+              <p className="text-base font-semibold text-red-900">
+                {submitError}
               </p>
             </div>
           ) : null}
@@ -415,14 +475,15 @@ export default function RequestAccessPage() {
 
           <div className="mt-8 flex flex-col gap-4 border-t border-zinc-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm leading-6 text-zinc-600">
-              Phase 1 stores no data and sends no external request. Database,
-              email, and approval workflow integrations can be added next.
+              Submissions are saved for review in Supabase with a pending
+              status. Login and approval workflow screens can be added next.
             </p>
             <button
+              disabled={isSubmitting}
               type="submit"
-              className="inline-flex min-h-12 items-center justify-center rounded-sm bg-emerald-800 px-6 py-3 text-base font-semibold text-white transition hover:bg-emerald-900"
+              className="inline-flex min-h-12 items-center justify-center rounded-sm bg-emerald-800 px-6 py-3 text-base font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:bg-zinc-400"
             >
-              Submit Access Request
+              {isSubmitting ? "Submitting..." : "Submit Access Request"}
             </button>
           </div>
         </form>
