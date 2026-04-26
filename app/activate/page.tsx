@@ -73,6 +73,7 @@ export default function ActivatePage() {
       }
 
       window.localStorage.setItem("approved_customer", "true");
+      window.localStorage.setItem("activated_customer", "true");
       window.localStorage.setItem(
         "customer_email",
         approvedRequest.business_email,
