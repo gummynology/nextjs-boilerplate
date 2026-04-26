@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 
 type AccessRequestStatus = "pending" | "approved" | "rejected" | string;
@@ -24,6 +25,8 @@ const tableHeaders = [
   "Created",
   "Review",
 ];
+
+const ADMIN_SESSION_KEY = "gummynology_admin_session";
 
 function formatDate(value: string) {
   if (!value) {
@@ -49,8 +52,10 @@ function statusClass(status: AccessRequestStatus) {
 }
 
 export default function AdminPage() {
+  const router = useRouter();
   const [requests, setRequests] = useState<AccessRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isCheckingAccess, setIsCheckingAccess] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [updatingId, setUpdatingId] = useState<number | string | null>(null);
 
@@ -124,11 +129,43 @@ export default function AdminPage() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      const hasAdminSession =
+        window.localStorage.getItem(ADMIN_SESSION_KEY) === "authenticated";
+
+      if (!hasAdminSession) {
+        router.replace("/admin-login");
+        return;
+      }
+
+      setIsCheckingAccess(false);
       loadRequests({ showLoading: false });
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [router]);
+
+  function handleSignOut() {
+    window.localStorage.removeItem(ADMIN_SESSION_KEY);
+    router.replace("/admin-login");
+  }
+
+  if (isCheckingAccess) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f7f6f1] px-5 text-zinc-950">
+        <div className="w-full max-w-md border border-zinc-200 bg-white p-8 text-center shadow-sm">
+          <p className="text-sm font-semibold tracking-[0.18em] text-emerald-800 uppercase">
+            Admin Access
+          </p>
+          <h1 className="mt-4 text-2xl font-semibold text-zinc-950">
+            Checking access
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-zinc-600">
+            Redirecting to admin login if authentication is required.
+          </p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-[#f7f6f1] text-zinc-950">
@@ -141,12 +178,21 @@ export default function AdminPage() {
             >
               Gummynology
             </Link>
-            <Link
-              href="/request-access"
-              className="rounded-sm border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-emerald-700 hover:text-emerald-800"
-            >
-              Request Access
-            </Link>
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <Link
+                href="/request-access"
+                className="rounded-sm border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-emerald-700 hover:text-emerald-800"
+              >
+                Request Access
+              </Link>
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="rounded-sm border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-red-700 hover:text-red-800"
+              >
+                Sign Out
+              </button>
+            </div>
           </nav>
 
           <div className="max-w-4xl py-6 lg:py-8">
