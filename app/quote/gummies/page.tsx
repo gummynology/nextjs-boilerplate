@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   findActiveIngredient,
   searchActiveIngredients,
@@ -29,6 +29,15 @@ type ActiveIngredient = {
 };
 
 type IngredientCostInput = Omit<ActiveIngredient, "id"> | ActiveIngredient;
+
+type IngredientPrice = {
+  name: string;
+  price_per_kg_usd: number | null;
+  price_confidence: "estimated" | "internal" | "needs_vendor_quote" | string;
+  notes: string | null;
+};
+
+type IngredientPriceMap = Record<string, IngredientPrice>;
 
 const createIngredient = (): ActiveIngredient => ({
   id: crypto.randomUUID(),
@@ -286,11 +295,7 @@ function IngredientSearchField({
                 </span>
                 <span className="mt-1 block text-xs text-zinc-500">
                   {definition.category} | {definition.common_dose_min}
-                  -{definition.common_dose_max} {definition.unit} |{" "}
-                  {definition.price_confidence === "needs_vendor_quote" ||
-                  definition.price_per_kg_usd === null
-                    ? "vendor quote required"
-                    : `$${definition.price_per_kg_usd}/kg ${definition.price_confidence}`}
+                  -{definition.common_dose_max} {definition.unit}
                 </span>
               </button>
             );
@@ -378,7 +383,11 @@ function formatCurrencyWithDecimals(value: number | null, decimals: number) {
 }
 
 function formatPerGummyPrice(value: number | null) {
-  return formatCurrencyWithDecimals(value, 4);
+  if (value === null) {
+    return "Not enough priced mg-based data";
+  }
+
+  return `${(value * 100).toFixed(4)}¢ / gummy`;
 }
 
 function formatServingPrice(value: number | null) {
@@ -506,8 +515,23 @@ function getMarginForKg(totalKg: number | null) {
   return 0.7;
 }
 
-function getIngredientCostPerServing(ingredient: IngredientCostInput) {
+function getIngredientPrice(
+  definition: ActiveIngredientDefinition | null | undefined,
+  ingredientPrices: IngredientPriceMap,
+) {
+  if (!definition) {
+    return null;
+  }
+
+  return ingredientPrices[definition.name.toLowerCase()] ?? null;
+}
+
+function getIngredientCostPerServing(
+  ingredient: IngredientCostInput,
+  ingredientPrices: IngredientPriceMap,
+) {
   const definition = findActiveIngredient(ingredient.ingredient_name);
+  const price = getIngredientPrice(definition, ingredientPrices);
   const amountMg = toMg(ingredient);
 
   if (!definition || amountMg === null) {
@@ -519,13 +543,14 @@ function getIngredientCostPerServing(ingredient: IngredientCostInput) {
   }
 
   if (
-    definition.price_confidence === "needs_vendor_quote" ||
-    definition.price_per_kg_usd === null
+    !price ||
+    price.price_confidence === "needs_vendor_quote" ||
+    price.price_per_kg_usd === null
   ) {
     return null;
   }
 
-  return (amountMg / 1_000_000) * definition.price_per_kg_usd;
+  return (amountMg / 1_000_000) * price.price_per_kg_usd;
 }
 
 function containsDifficultTerms(ingredients: ActiveIngredient[], notes: string) {
@@ -541,10 +566,14 @@ function containsDifficultTerms(ingredients: ActiveIngredient[], notes: string) 
   return difficultIngredientTerms.some((term) => searchable.includes(term));
 }
 
-function getIngredientReviewData(ingredients: ActiveIngredient[]) {
+function getIngredientReviewData(
+  ingredients: ActiveIngredient[],
+  ingredientPrices: IngredientPriceMap,
+) {
   const matches = ingredients
     .map((ingredient) => {
       const definition = findActiveIngredient(ingredient.ingredient_name);
+      const price = getIngredientPrice(definition, ingredientPrices);
 
       if (!definition) {
         return null;
@@ -562,13 +591,12 @@ function getIngredientReviewData(ingredients: ActiveIngredient[]) {
         requires_rd_review: definition.requires_rd_review,
         regulatory_review_required:
           definition.regulatory_review_required === true,
-        bulk_price_usd_per_kg: definition.bulk_price_usd_per_kg,
-        price_per_kg_usd: definition.price_per_kg_usd,
-        price_confidence: definition.price_confidence,
+        price_per_kg_usd: price?.price_per_kg_usd ?? null,
+        price_confidence: price?.price_confidence ?? "needs_vendor_quote",
         vendor_quote_required:
-          definition.price_confidence === "needs_vendor_quote",
+          !price || price.price_confidence === "needs_vendor_quote",
         estimated_raw_cost_per_serving:
-          getIngredientCostPerServing(ingredient),
+          getIngredientCostPerServing(ingredient, ingredientPrices),
         notes: definition.notes,
       };
     })
@@ -591,7 +619,11 @@ function getIngredientReviewData(ingredients: ActiveIngredient[]) {
   };
 }
 
-function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]) {
+function buildPreview(
+  values: GummiesFormValues,
+  ingredients: ActiveIngredient[],
+  ingredientPrices: IngredientPriceMap,
+) {
   const convertedAmounts = ingredients.map(toMg).filter((amount) => amount !== null);
   const hasUnconvertedAmounts = ingredients.some(
     (ingredient) => ingredient.amount_per_serving && toMg(ingredient) === null,
@@ -630,8 +662,12 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
     )
     .map((ingredient) => {
       const definition = findActiveIngredient(ingredient.ingredient_name);
+      const price = getIngredientPrice(definition, ingredientPrices);
       const amountMg = toMg(ingredient);
-      const costPerServing = getIngredientCostPerServing(ingredient);
+      const costPerServing = getIngredientCostPerServing(
+        ingredient,
+        ingredientPrices,
+      );
 
       return {
         ingredient_name: ingredient.ingredient_name.trim(),
@@ -639,11 +675,10 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
         customer_supplied: ingredient.customer_supplied,
         amount_per_serving: ingredient.amount_per_serving,
         unit: ingredient.unit,
-        bulk_price_usd_per_kg: definition?.bulk_price_usd_per_kg ?? null,
-        price_per_kg_usd: definition?.price_per_kg_usd ?? null,
-        price_confidence: definition?.price_confidence ?? null,
+        price_per_kg_usd: price?.price_per_kg_usd ?? null,
+        price_confidence: price?.price_confidence ?? "needs_vendor_quote",
         vendor_quote_required:
-          definition?.price_confidence === "needs_vendor_quote",
+          !price || price.price_confidence === "needs_vendor_quote",
         amount_mg_equivalent: amountMg,
         estimated_raw_cost_per_serving: costPerServing,
         estimated_raw_cost_per_gummy:
@@ -651,7 +686,7 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
         pricing_note:
           ingredient.customer_supplied === "yes"
             ? "Customer-supplied ingredient excluded from raw material cost."
-            : definition?.price_confidence === "needs_vendor_quote"
+            : !price || price.price_confidence === "needs_vendor_quote"
               ? "Vendor quote required for this ingredient. It is excluded from the active cost estimate until procurement confirms pricing."
               : definition && amountMg !== null
               ? "Estimated bulk ingredient cost only. Does not include overage, waste, freight, testing, labor, packaging, margin, or final procurement pricing."
@@ -711,7 +746,7 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
   const isLowOrSugarFree =
     values.base_type === "Low Sugar Pectin" ||
     values.base_type === "Sugar Free Pectin";
-  const ingredientReview = getIngredientReviewData(ingredients);
+  const ingredientReview = getIngredientReviewData(ingredients, ingredientPrices);
   const activeCount = ingredients.filter(
     (ingredient) =>
       ingredient.ingredient_name.trim() ||
@@ -993,14 +1028,79 @@ export default function GummiesQuotePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [ingredientPrices, setIngredientPrices] = useState<IngredientPriceMap>(
+    {},
+  );
+  const [isLoadingIngredientPrices, setIsLoadingIngredientPrices] =
+    useState(true);
+  const [ingredientPriceError, setIngredientPriceError] = useState("");
 
   const preview = useMemo(
-    () => buildPreview(values, ingredients),
-    [values, ingredients],
+    () => buildPreview(values, ingredients, ingredientPrices),
+    [values, ingredients, ingredientPrices],
   );
   const availableWeightOptions = values.shape
     ? (weightOptionsByShape[values.shape] ?? ["Custom"])
     : [];
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadIngredientPrices() {
+      const supabase = getSupabaseClient();
+
+      if (!supabase) {
+        if (isMounted) {
+          setIngredientPriceError(
+            "Supabase is not configured. Ingredient prices require NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+          );
+          setIsLoadingIngredientPrices(false);
+        }
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("ingredient_prices")
+        .select("name, price_per_kg_usd, price_confidence, notes")
+        .order("name", { ascending: true });
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (error) {
+        setIngredientPriceError(
+          error.message || "Unable to load ingredient prices.",
+        );
+        setIsLoadingIngredientPrices(false);
+        return;
+      }
+
+      const nextPrices = Object.fromEntries(
+        (data || []).map((row) => [
+          String(row.name).toLowerCase(),
+          {
+            name: String(row.name),
+            price_per_kg_usd:
+              row.price_per_kg_usd === null
+                ? null
+                : Number(row.price_per_kg_usd),
+            price_confidence: String(row.price_confidence),
+            notes: row.notes === null ? null : String(row.notes),
+          },
+        ]),
+      );
+
+      setIngredientPrices(nextPrices);
+      setIsLoadingIngredientPrices(false);
+    }
+
+    loadIngredientPrices();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   function updateField<Key extends keyof GummiesFormValues>(
     field: Key,
@@ -1165,6 +1265,11 @@ export default function GummiesQuotePage() {
       }))
       .map((ingredient) => {
         const definition = findActiveIngredient(ingredient.ingredient_name);
+        const price = getIngredientPrice(definition, ingredientPrices);
+        const estimatedRawCostPerServing = getIngredientCostPerServing(
+          ingredient,
+          ingredientPrices,
+        );
 
         return {
           ...ingredient,
@@ -1178,17 +1283,15 @@ export default function GummiesQuotePage() {
           requires_rd_review: definition?.requires_rd_review ?? false,
           regulatory_review_required:
             definition?.regulatory_review_required === true,
-          bulk_price_usd_per_kg: definition?.bulk_price_usd_per_kg ?? null,
-          price_per_kg_usd: definition?.price_per_kg_usd ?? null,
-          price_confidence: definition?.price_confidence ?? null,
+          price_per_kg_usd: price?.price_per_kg_usd ?? null,
+          price_confidence: price?.price_confidence ?? "needs_vendor_quote",
           vendor_quote_required:
-            definition?.price_confidence === "needs_vendor_quote",
-          estimated_raw_cost_per_serving:
-            getIngredientCostPerServing(ingredient),
+            !price || price.price_confidence === "needs_vendor_quote",
+          estimated_raw_cost_per_serving: estimatedRawCostPerServing,
           estimated_raw_cost_per_gummy:
-            getIngredientCostPerServing(ingredient) === null
+            estimatedRawCostPerServing === null
               ? null
-              : getIngredientCostPerServing(ingredient)! /
+              : estimatedRawCostPerServing /
                 (preview.recommended_serving_size === "1 gummy"
                   ? 1
                   : preview.recommended_serving_size === "2 gummies"
@@ -1228,7 +1331,10 @@ export default function GummiesQuotePage() {
         rd_fee: preview.rd_fee,
         mold_cost: preview.mold_cost,
         active_ingredients: normalizedIngredients,
-        active_ingredient_review: getIngredientReviewData(ingredients),
+        active_ingredient_review: getIngredientReviewData(
+          ingredients,
+          ingredientPrices,
+        ),
         feasibility_preview: preview,
       },
       created_at: new Date().toISOString(),
@@ -1676,9 +1782,19 @@ export default function GummiesQuotePage() {
             Estimated pricing only. Final quote requires vendor confirmation
             and technical review.
           </p>
+          {isLoadingIngredientPrices ? (
+            <p className="mt-3 border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-600">
+              Loading Supabase ingredient prices.
+            </p>
+          ) : null}
+          {ingredientPriceError ? (
+            <p className="mt-3 border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
+              {ingredientPriceError}
+            </p>
+          ) : null}
           <div className="mt-6 grid gap-4">
             <PricingQuoteCard
-              label="Estimated Price Per Gummy"
+              label="Estimated Price Per Gummy (¢)"
               value={formatMainPricingValueWith(
                 preview.pricing_engine.estimated_price_per_gummy,
                 preview.pricing_engine.active_count,
@@ -1686,7 +1802,7 @@ export default function GummiesQuotePage() {
               )}
               note={getMainPricingNote(
                 preview.pricing_engine.active_count,
-                "Calculated from precise unit cost × total gummies. Estimated only. Includes active cost, gummy overhead, active complexity fee, and applied margin.",
+                "Total price is calculated using precise unit cost × total gummies. Estimated only. Includes active cost, gummy overhead, active complexity fee, and applied margin.",
               )}
             />
             <PricingQuoteCard
@@ -1717,7 +1833,7 @@ export default function GummiesQuotePage() {
               )}
               note={getMainPricingNote(
                 preview.pricing_engine.active_count,
-                "Calculated from precise unit cost × total gummies. Estimated only.",
+                "Total price is calculated using precise unit cost × total gummies. Estimated only.",
               )}
             />
             <PreviewItem
@@ -1746,7 +1862,7 @@ export default function GummiesQuotePage() {
               )}
               note={getMainPricingNote(
                 preview.pricing_engine.active_count,
-                "Calculated from precise unit cost × total gummies. Estimated only. Commercial quote still requires review.",
+                "Total price is calculated using precise unit cost × total gummies. Estimated only. Commercial quote still requires review.",
               )}
             />
             <PreviewItem
