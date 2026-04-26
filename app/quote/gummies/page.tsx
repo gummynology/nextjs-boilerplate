@@ -2,8 +2,10 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import {
-  activeIngredientSearchOptions,
   findActiveIngredient,
+  searchActiveIngredients,
+  uniqueActiveIngredients,
+  type ActiveIngredientDefinition,
   type IngredientUnit,
 } from "@/lib/activeIngredients";
 import { getSupabaseClient } from "@/lib/supabaseClient";
@@ -187,6 +189,120 @@ function SelectField({
         ))}
       </select>
     </FieldLabel>
+  );
+}
+
+function IngredientSearchField({
+  ingredient,
+  selectedNames,
+  onCustomChange,
+  onSelectIngredient,
+}: {
+  ingredient: ActiveIngredient;
+  selectedNames: string[];
+  onCustomChange: (value: string) => void;
+  onSelectIngredient: (definition: ActiveIngredientDefinition) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const query = ingredient.ingredient_name;
+  const results = searchActiveIngredients(query);
+  const matchedIngredient = findActiveIngredient(query);
+  const normalizedSelectedNames = selectedNames.map((name) =>
+    findActiveIngredient(name)?.name.toLowerCase(),
+  );
+  const typedValueCanBeCustom =
+    query.trim() && !matchedIngredient && results.length === 0;
+
+  return (
+    <div
+      className="relative"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setIsOpen(false);
+        }
+      }}
+    >
+      <input
+        type="text"
+        value={ingredient.ingredient_name}
+        onFocus={() => setIsOpen(true)}
+        onChange={(event) => {
+          onCustomChange(event.target.value);
+          setIsOpen(true);
+        }}
+        className={fieldClass}
+        placeholder="Search ingredient, alias, or category"
+        autoComplete="off"
+      />
+
+      {isOpen ? (
+        <div className="absolute z-30 mt-2 max-h-80 w-full overflow-y-auto border border-zinc-300 bg-white shadow-lg">
+          {results.map((definition) => {
+            const isAlreadyAdded =
+              definition.name.toLowerCase() !==
+                matchedIngredient?.name.toLowerCase() &&
+              normalizedSelectedNames.includes(definition.name.toLowerCase());
+
+            return (
+              <button
+                key={definition.name}
+                type="button"
+                disabled={isAlreadyAdded}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  if (isAlreadyAdded) {
+                    return;
+                  }
+
+                  onSelectIngredient(definition);
+                  setIsOpen(false);
+                }}
+                className={`block w-full border-b border-zinc-100 px-3 py-3 text-left transition last:border-b-0 ${
+                  isAlreadyAdded
+                    ? "cursor-not-allowed bg-zinc-50 text-zinc-400"
+                    : "bg-white text-zinc-900 hover:bg-emerald-50"
+                }`}
+              >
+                <span className="block text-sm font-semibold">
+                  {definition.name}
+                  {isAlreadyAdded ? (
+                    <span className="ml-2 text-xs font-semibold text-zinc-500">
+                      Already added
+                    </span>
+                  ) : null}
+                </span>
+                <span className="mt-1 block text-xs text-zinc-500">
+                  {definition.category} | {definition.common_dose_min}
+                  -{definition.common_dose_max} {definition.unit}
+                </span>
+              </button>
+            );
+          })}
+
+          {typedValueCanBeCustom ? (
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setIsOpen(false)}
+              className="block w-full border-b border-zinc-100 px-3 py-3 text-left text-sm font-semibold text-emerald-900 hover:bg-emerald-50"
+            >
+              Add custom ingredient: "{query.trim()}"
+            </button>
+          ) : null}
+
+          {results.length === 0 && !typedValueCanBeCustom ? (
+            <div className="px-3 py-3 text-sm text-zinc-500">
+              No library match found.
+            </div>
+          ) : null}
+
+          <div className="sticky bottom-0 border-t border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-500">
+            Showing {results.length} of {uniqueActiveIngredients.length}{" "}
+            ingredients
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -521,6 +637,18 @@ export default function GummiesQuotePage() {
       return "Add at least one active ingredient with an amount per serving.";
     }
 
+    const canonicalIngredientNames = ingredients
+      .map((ingredient) =>
+        findActiveIngredient(ingredient.ingredient_name)?.name.toLowerCase(),
+      )
+      .filter((name): name is string => Boolean(name));
+
+    if (
+      new Set(canonicalIngredientNames).size !== canonicalIngredientNames.length
+    ) {
+      return "Each active ingredient can only be added once.";
+    }
+
     return "";
   }
 
@@ -713,15 +841,6 @@ export default function GummiesQuotePage() {
 
           <QuoteSection title="Active Ingredient Builder">
             <div className="sm:col-span-2">
-              <datalist id="active-ingredient-options">
-                {activeIngredientSearchOptions.map((option) => (
-                  <option
-                    key={`${option.value}-${option.label}`}
-                    value={option.value}
-                    label={option.label}
-                  />
-                ))}
-              </datalist>
               <div className="hidden gap-3 border-b border-zinc-200 pb-2 text-xs font-semibold tracking-[0.12em] text-zinc-500 uppercase lg:grid lg:grid-cols-[1.25fr_0.72fr_0.52fr_0.72fr_1.35fr_0.45fr]">
                 <span>Ingredient</span>
                 <span>Amount</span>
@@ -759,19 +878,37 @@ export default function GummiesQuotePage() {
                           <span className="text-xs font-semibold text-zinc-700 lg:hidden">
                             Ingredient
                           </span>
-                          <input
-                            type="text"
-                            list="active-ingredient-options"
-                            value={ingredient.ingredient_name}
-                            onChange={(event) =>
+                          <IngredientSearchField
+                            ingredient={ingredient}
+                            selectedNames={ingredients
+                              .filter((item) => item.id !== ingredient.id)
+                              .map((item) => item.ingredient_name)}
+                            onCustomChange={(value) =>
                               updateIngredient(
                                 ingredient.id,
                                 "ingredient_name",
-                                event.target.value,
+                                value,
                               )
                             }
-                            className={fieldClass}
-                            placeholder="Search ingredient or alias"
+                            onSelectIngredient={(definition) => {
+                              setIngredients((current) =>
+                                current.map((item) =>
+                                  item.id === ingredient.id
+                                    ? {
+                                        ...item,
+                                        ingredient_name: definition.name,
+                                        amount_per_serving:
+                                          item.amount_per_serving ||
+                                          String(definition.default_dose),
+                                        unit: definition.unit,
+                                        notes: item.notes || definition.notes,
+                                      }
+                                    : item,
+                                ),
+                              );
+                              setSubmitError("");
+                              setSubmitted(false);
+                            }}
                           />
                         </label>
                         <label>
