@@ -1,0 +1,300 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { getSupabaseClient } from "@/lib/supabaseClient";
+
+type AccessRequestStatus = "pending" | "approved" | "rejected" | string;
+
+type AccessRequest = {
+  id: number | string;
+  first_name: string;
+  last_name: string;
+  company_name: string;
+  business_email: string;
+  status: AccessRequestStatus;
+  created_at: string;
+};
+
+const tableHeaders = [
+  "Name",
+  "Company",
+  "Business Email",
+  "Status",
+  "Created",
+  "Review",
+];
+
+function formatDate(value: string) {
+  if (!value) {
+    return "Not available";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function statusClass(status: AccessRequestStatus) {
+  if (status === "approved") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-800";
+  }
+
+  if (status === "rejected") {
+    return "border-red-200 bg-red-50 text-red-800";
+  }
+
+  return "border-amber-200 bg-amber-50 text-amber-800";
+}
+
+export default function AdminPage() {
+  const [requests, setRequests] = useState<AccessRequest[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [updatingId, setUpdatingId] = useState<number | string | null>(null);
+
+  async function loadRequests({ showLoading = true } = {}) {
+    const supabase = getSupabaseClient();
+
+    if (!supabase) {
+      setErrorMessage(
+        "Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to load access requests.",
+      );
+      setIsLoading(false);
+      return;
+    }
+
+    if (showLoading) {
+      setIsLoading(true);
+    }
+    setErrorMessage("");
+
+    const { data, error } = await supabase
+      .from("access_requests")
+      .select(
+        "id, first_name, last_name, company_name, business_email, status, created_at",
+      )
+      .order("created_at", { ascending: false });
+
+    setIsLoading(false);
+
+    if (error) {
+      setErrorMessage(error.message || "Unable to load access requests.");
+      return;
+    }
+
+    setRequests((data || []) as AccessRequest[]);
+  }
+
+  async function updateStatus(
+    request: AccessRequest,
+    nextStatus: "approved" | "rejected",
+  ) {
+    const supabase = getSupabaseClient();
+
+    if (!supabase) {
+      setErrorMessage(
+        "Supabase is not configured. Add environment variables before reviewing requests.",
+      );
+      return;
+    }
+
+    setUpdatingId(request.id);
+    setErrorMessage("");
+
+    const { error } = await supabase
+      .from("access_requests")
+      .update({ status: nextStatus })
+      .eq("id", request.id);
+
+    setUpdatingId(null);
+
+    if (error) {
+      setErrorMessage(error.message || "Unable to update request status.");
+      return;
+    }
+
+    setRequests((current) =>
+      current.map((item) =>
+        item.id === request.id ? { ...item, status: nextStatus } : item,
+      ),
+    );
+  }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      loadRequests({ showLoading: false });
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  return (
+    <main className="min-h-screen bg-[#f7f6f1] text-zinc-950">
+      <section className="border-b border-zinc-200 bg-white">
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
+          <nav className="flex items-center justify-between gap-4">
+            <Link
+              href="/"
+              className="text-base font-semibold tracking-[0.18em] text-zinc-950 uppercase"
+            >
+              Gummynology
+            </Link>
+            <Link
+              href="/request-access"
+              className="rounded-sm border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-emerald-700 hover:text-emerald-800"
+            >
+              Request Access
+            </Link>
+          </nav>
+
+          <div className="max-w-4xl py-6 lg:py-8">
+            <p className="text-sm font-semibold tracking-[0.22em] text-emerald-800 uppercase">
+              Internal Review
+            </p>
+            <h1 className="mt-5 text-4xl font-semibold leading-tight tracking-normal text-zinc-950 sm:text-5xl">
+              Access request admin dashboard
+            </h1>
+            <p className="mt-5 max-w-3xl text-lg leading-8 text-zinc-700">
+              Review submitted company requests and update approval status for
+              the Gummynology quote system.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 lg:px-10 lg:py-14">
+        <div className="border border-zinc-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-4 border-b border-zinc-200 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+            <div>
+              <h2 className="text-2xl font-semibold text-zinc-950">
+                Access requests
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-zinc-600">
+                Status updates are saved directly to Supabase.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => loadRequests()}
+              disabled={isLoading}
+              className="inline-flex min-h-11 items-center justify-center rounded-sm border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-emerald-700 hover:text-emerald-800 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400"
+            >
+              {isLoading ? "Loading..." : "Refresh"}
+            </button>
+          </div>
+
+          {errorMessage ? (
+            <div className="m-5 border border-red-200 bg-red-50 p-4 sm:m-6">
+              <p className="text-sm font-semibold text-red-900">
+                {errorMessage}
+              </p>
+            </div>
+          ) : null}
+
+          {isLoading ? (
+            <div className="p-8 text-center">
+              <p className="text-base font-semibold text-zinc-700">
+                Loading access requests...
+              </p>
+            </div>
+          ) : null}
+
+          {!isLoading && requests.length === 0 ? (
+            <div className="p-8 text-center">
+              <p className="text-base font-semibold text-zinc-700">
+                No access requests found.
+              </p>
+            </div>
+          ) : null}
+
+          {!isLoading && requests.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[920px] border-collapse text-left">
+                <thead className="bg-zinc-50">
+                  <tr>
+                    {tableHeaders.map((header) => (
+                      <th
+                        key={header}
+                        className="border-b border-zinc-200 px-5 py-4 text-xs font-semibold tracking-[0.14em] text-zinc-600 uppercase"
+                      >
+                        {header}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-200">
+                  {requests.map((request) => {
+                    const isUpdating = updatingId === request.id;
+
+                    return (
+                      <tr key={request.id} className="align-top">
+                        <td className="px-5 py-4">
+                          <p className="text-sm font-semibold text-zinc-950">
+                            {request.first_name} {request.last_name}
+                          </p>
+                        </td>
+                        <td className="px-5 py-4">
+                          <p className="text-sm text-zinc-700">
+                            {request.company_name}
+                          </p>
+                        </td>
+                        <td className="px-5 py-4">
+                          <a
+                            href={`mailto:${request.business_email}`}
+                            className="text-sm font-medium text-emerald-800 hover:text-emerald-950"
+                          >
+                            {request.business_email}
+                          </a>
+                        </td>
+                        <td className="px-5 py-4">
+                          <span
+                            className={`inline-flex rounded-sm border px-2.5 py-1 text-xs font-semibold uppercase ${statusClass(
+                              request.status,
+                            )}`}
+                          >
+                            {request.status}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4">
+                          <p className="text-sm text-zinc-700">
+                            {formatDate(request.created_at)}
+                          </p>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              disabled={
+                                isUpdating || request.status === "approved"
+                              }
+                              onClick={() => updateStatus(request, "approved")}
+                              className="inline-flex min-h-10 items-center justify-center rounded-sm bg-emerald-800 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                            >
+                              {isUpdating ? "Saving..." : "Approve"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={
+                                isUpdating || request.status === "rejected"
+                              }
+                              onClick={() => updateStatus(request, "rejected")}
+                              className="inline-flex min-h-10 items-center justify-center rounded-sm border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-800 transition hover:border-red-700 hover:text-red-800 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </div>
+      </section>
+    </main>
+  );
+}
