@@ -183,12 +183,13 @@ export default function AdminPage() {
 
         if (!response.ok) {
           setWarningMessage(
-            result?.error ||
-              "Access was approved, but the activation email could not be sent. Copy the activation link and send it manually.",
+            `Access was approved, but the activation email could not be sent. ${
+              result?.error || "No error detail was returned by the email API."
+            } Copy the activation link and send it manually.`,
           );
         } else {
           setSuccessMessage(
-            `Access approved and activation email sent to ${request.business_email}.`,
+            `Email sent successfully. Access approved and activation email sent to ${request.business_email}.`,
           );
         }
       } catch {
