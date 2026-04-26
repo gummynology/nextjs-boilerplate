@@ -28,6 +28,8 @@ type ActiveIngredient = {
   notes: string;
 };
 
+type IngredientCostInput = Omit<ActiveIngredient, "id"> | ActiveIngredient;
+
 const createIngredient = (): ActiveIngredient => ({
   id: crypto.randomUUID(),
   ingredient_name: "",
@@ -273,7 +275,8 @@ function IngredientSearchField({
                 </span>
                 <span className="mt-1 block text-xs text-zinc-500">
                   {definition.category} | {definition.common_dose_min}
-                  -{definition.common_dose_max} {definition.unit}
+                  -{definition.common_dose_max} {definition.unit} | $
+                  {definition.bulk_price_usd_per_kg}/kg est.
                 </span>
               </button>
             );
@@ -306,7 +309,7 @@ function IngredientSearchField({
   );
 }
 
-function toMg(ingredient: ActiveIngredient) {
+function toMg(ingredient: IngredientCostInput) {
   const amount = Number(ingredient.amount_per_serving);
 
   if (!Number.isFinite(amount) || amount <= 0) {
@@ -334,6 +337,37 @@ function formatMg(value: number | null) {
   }
 
   return `${Number(value.toFixed(value >= 10 ? 0 : 2))} mg`;
+}
+
+function formatCurrency(value: number | null) {
+  if (value === null) {
+    return "Not enough priced mg-based data";
+  }
+
+  if (value === 0) {
+    return "$0.00";
+  }
+
+  if (value < 0.01) {
+    return `$${value.toFixed(4)}`;
+  }
+
+  return `$${value.toFixed(2)}`;
+}
+
+function getIngredientCostPerServing(ingredient: IngredientCostInput) {
+  const definition = findActiveIngredient(ingredient.ingredient_name);
+  const amountMg = toMg(ingredient);
+
+  if (!definition || amountMg === null) {
+    return null;
+  }
+
+  if (ingredient.customer_supplied === "yes") {
+    return 0;
+  }
+
+  return (amountMg / 1_000_000) * definition.bulk_price_usd_per_kg;
 }
 
 function containsDifficultTerms(ingredients: ActiveIngredient[], notes: string) {
@@ -370,6 +404,9 @@ function getIngredientReviewData(ingredients: ActiveIngredient[]) {
         requires_rd_review: definition.requires_rd_review,
         regulatory_review_required:
           definition.regulatory_review_required === true,
+        bulk_price_usd_per_kg: definition.bulk_price_usd_per_kg,
+        estimated_raw_cost_per_serving:
+          getIngredientCostPerServing(ingredient),
         notes: definition.notes,
       };
     })
@@ -423,6 +460,68 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
     totalActiveMgPerServing === null
       ? null
       : totalActiveMgPerServing / servingDivisor;
+  const ingredientCostLines = ingredients
+    .filter(
+      (ingredient) =>
+        ingredient.ingredient_name.trim() ||
+        ingredient.amount_per_serving.trim(),
+    )
+    .map((ingredient) => {
+      const definition = findActiveIngredient(ingredient.ingredient_name);
+      const amountMg = toMg(ingredient);
+      const costPerServing = getIngredientCostPerServing(ingredient);
+
+      return {
+        ingredient_name: ingredient.ingredient_name.trim(),
+        matched_ingredient_name: definition?.name ?? null,
+        customer_supplied: ingredient.customer_supplied,
+        amount_per_serving: ingredient.amount_per_serving,
+        unit: ingredient.unit,
+        bulk_price_usd_per_kg: definition?.bulk_price_usd_per_kg ?? null,
+        amount_mg_equivalent: amountMg,
+        estimated_raw_cost_per_serving: costPerServing,
+        estimated_raw_cost_per_gummy:
+          costPerServing === null ? null : costPerServing / servingDivisor,
+        pricing_note:
+          ingredient.customer_supplied === "yes"
+            ? "Customer-supplied ingredient excluded from raw material cost."
+            : definition && amountMg !== null
+              ? "Estimated bulk ingredient cost only. Does not include overage, waste, freight, testing, labor, packaging, margin, or final procurement pricing."
+              : "Cost not calculated because the ingredient is custom, unmatched, IU-based, CFU-based, or missing mg-equivalent data.",
+      };
+    });
+  const pricedIngredientCostLines = ingredientCostLines.filter(
+    (line) => line.estimated_raw_cost_per_serving !== null,
+  );
+  const totalRawActiveCostPerServing =
+    pricedIngredientCostLines.length > 0
+      ? pricedIngredientCostLines.reduce(
+          (total, line) =>
+            total + (line.estimated_raw_cost_per_serving ?? 0),
+          0,
+        )
+      : null;
+  const totalRawActiveCostPerGummy =
+    totalRawActiveCostPerServing === null
+      ? null
+      : totalRawActiveCostPerServing / servingDivisor;
+  const countPerUnit = Number(values.count_per_unit);
+  const quantity = Number(values.quantity);
+  const estimatedRawActiveCostPerUnit =
+    totalRawActiveCostPerGummy !== null &&
+    Number.isFinite(countPerUnit) &&
+    countPerUnit > 0
+      ? totalRawActiveCostPerGummy * countPerUnit
+      : null;
+  const estimatedRawActiveCostForOrder =
+    estimatedRawActiveCostPerUnit !== null &&
+    Number.isFinite(quantity) &&
+    quantity > 0
+      ? estimatedRawActiveCostPerUnit * quantity
+      : null;
+  const hasUnpricedIngredientCosts = ingredientCostLines.some(
+    (line) => line.estimated_raw_cost_per_serving === null,
+  );
   const isLowOrSugarFree =
     values.base_type === "Low Sugar Pectin" ||
     values.base_type === "Sugar Free Pectin";
@@ -500,6 +599,14 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
     total_active_mg_per_serving: totalActiveMgPerServing,
     has_unconverted_active_amounts: hasUnconvertedAmounts,
     active_mg_per_gummy: activeMgPerGummy,
+    ingredient_cost_lines: ingredientCostLines,
+    total_raw_active_cost_per_serving: totalRawActiveCostPerServing,
+    estimated_raw_active_cost_per_gummy: totalRawActiveCostPerGummy,
+    estimated_raw_active_cost_per_unit: estimatedRawActiveCostPerUnit,
+    estimated_raw_active_cost_for_order: estimatedRawActiveCostForOrder,
+    has_unpriced_ingredient_costs: hasUnpricedIngredientCosts,
+    pricing_basis:
+      "Estimated bulk active ingredient cost only. Not a final customer quote and excludes overage, yield loss, freight, testing, labor, packaging, margin, taxes, and current procurement confirmation.",
     pectin_recommendation: pectinRecommendation,
     pectin_reason: pectinReason,
     rd_requirement: rdRequirement,
@@ -704,6 +811,20 @@ export default function GummiesQuotePage() {
           requires_rd_review: definition?.requires_rd_review ?? false,
           regulatory_review_required:
             definition?.regulatory_review_required === true,
+          bulk_price_usd_per_kg: definition?.bulk_price_usd_per_kg ?? null,
+          estimated_raw_cost_per_serving:
+            getIngredientCostPerServing(ingredient),
+          estimated_raw_cost_per_gummy:
+            getIngredientCostPerServing(ingredient) === null
+              ? null
+              : getIngredientCostPerServing(ingredient)! /
+                (preview.recommended_serving_size === "1 gummy"
+                  ? 1
+                  : preview.recommended_serving_size === "2 gummies"
+                    ? 2
+                    : preview.recommended_serving_size === "3 gummies"
+                      ? 3
+                      : 4),
           ingredient_library_notes: definition?.notes ?? null,
         };
       });
@@ -1134,6 +1255,29 @@ export default function GummiesQuotePage() {
             Technical signals
           </h2>
           <div className="mt-6 grid gap-4">
+            <PreviewItem
+              label="Estimated Raw Active Cost Per Gummy"
+              value={formatCurrency(
+                preview.estimated_raw_active_cost_per_gummy,
+              )}
+              note={
+                preview.has_unpriced_ingredient_costs
+                  ? "Some custom, IU-based, CFU-based, unmatched, or customer-supplied ingredients are not included."
+                  : preview.pricing_basis
+              }
+            />
+            <PreviewItem
+              label="Estimated Raw Active Cost Per Unit"
+              value={formatCurrency(preview.estimated_raw_active_cost_per_unit)}
+              note="Uses count per unit when available. This is active raw material only, not finished goods pricing."
+            />
+            <PreviewItem
+              label="Estimated Raw Active Cost For Order"
+              value={formatCurrency(
+                preview.estimated_raw_active_cost_for_order,
+              )}
+              note="Uses quantity and count per unit when available. Final quote still requires purchasing and production review."
+            />
             <PreviewItem
               label="Recommended Serving Size"
               value={preview.recommended_serving_size}
