@@ -275,8 +275,11 @@ function IngredientSearchField({
                 </span>
                 <span className="mt-1 block text-xs text-zinc-500">
                   {definition.category} | {definition.common_dose_min}
-                  -{definition.common_dose_max} {definition.unit} | $
-                  {definition.bulk_price_usd_per_kg}/kg est.
+                  -{definition.common_dose_max} {definition.unit} |{" "}
+                  {definition.price_confidence === "needs_vendor_quote" ||
+                  definition.price_per_kg_usd === null
+                    ? "vendor quote required"
+                    : `$${definition.price_per_kg_usd}/kg ${definition.price_confidence}`}
                 </span>
               </button>
             );
@@ -417,7 +420,14 @@ function getIngredientCostPerServing(ingredient: IngredientCostInput) {
     return 0;
   }
 
-  return (amountMg / 1_000_000) * definition.bulk_price_usd_per_kg;
+  if (
+    definition.price_confidence === "needs_vendor_quote" ||
+    definition.price_per_kg_usd === null
+  ) {
+    return null;
+  }
+
+  return (amountMg / 1_000_000) * definition.price_per_kg_usd;
 }
 
 function containsDifficultTerms(ingredients: ActiveIngredient[], notes: string) {
@@ -455,6 +465,10 @@ function getIngredientReviewData(ingredients: ActiveIngredient[]) {
         regulatory_review_required:
           definition.regulatory_review_required === true,
         bulk_price_usd_per_kg: definition.bulk_price_usd_per_kg,
+        price_per_kg_usd: definition.price_per_kg_usd,
+        price_confidence: definition.price_confidence,
+        vendor_quote_required:
+          definition.price_confidence === "needs_vendor_quote",
         estimated_raw_cost_per_serving:
           getIngredientCostPerServing(ingredient),
         notes: definition.notes,
@@ -528,6 +542,10 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
         amount_per_serving: ingredient.amount_per_serving,
         unit: ingredient.unit,
         bulk_price_usd_per_kg: definition?.bulk_price_usd_per_kg ?? null,
+        price_per_kg_usd: definition?.price_per_kg_usd ?? null,
+        price_confidence: definition?.price_confidence ?? null,
+        vendor_quote_required:
+          definition?.price_confidence === "needs_vendor_quote",
         amount_mg_equivalent: amountMg,
         estimated_raw_cost_per_serving: costPerServing,
         estimated_raw_cost_per_gummy:
@@ -535,7 +553,9 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
         pricing_note:
           ingredient.customer_supplied === "yes"
             ? "Customer-supplied ingredient excluded from raw material cost."
-            : definition && amountMg !== null
+            : definition?.price_confidence === "needs_vendor_quote"
+              ? "Vendor quote required for this ingredient. It is excluded from the active cost estimate until procurement confirms pricing."
+              : definition && amountMg !== null
               ? "Estimated bulk ingredient cost only. Does not include overage, waste, freight, testing, labor, packaging, margin, or final procurement pricing."
               : "Cost not calculated because the ingredient is custom, unmatched, IU-based, CFU-based, or missing mg-equivalent data.",
       };
@@ -573,6 +593,11 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
   const hasUnpricedIngredientCosts = ingredientCostLines.some(
     (line) => line.estimated_raw_cost_per_serving === null,
   );
+  const vendorQuoteIngredientNames = ingredientCostLines
+    .filter((line) => line.vendor_quote_required)
+    .map((line) => line.matched_ingredient_name ?? line.ingredient_name)
+    .filter((name) => name.trim());
+  const hasVendorQuoteIngredientCosts = vendorQuoteIngredientNames.length > 0;
   const isLowOrSugarFree =
     values.base_type === "Low Sugar Pectin" ||
     values.base_type === "Sugar Free Pectin";
@@ -711,8 +736,8 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
       ? overheadPerGummy * pricedTotalGummies
       : null;
   const activeCost =
-    totalRawActiveCostPerGummy !== null && pricedTotalGummies !== null
-      ? totalRawActiveCostPerGummy * pricedTotalGummies
+    pricedTotalGummies !== null
+      ? activeCostPerGummyForPricing * pricedTotalGummies
       : null;
   const complexityFee =
     pricedTotalGummies !== null
@@ -730,7 +755,7 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
   const pricingDataComplete =
     gummyWeightG !== null &&
     requestedTotalGummies !== null &&
-    totalRawActiveCostPerGummy !== null;
+    totalActiveMgPerServing !== null;
 
   return {
     recommended_serving_size: recommendedServingSize,
@@ -743,8 +768,12 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
     estimated_raw_active_cost_per_unit: estimatedRawActiveCostPerUnit,
     estimated_raw_active_cost_for_order: estimatedRawActiveCostForOrder,
     has_unpriced_ingredient_costs: hasUnpricedIngredientCosts,
+    vendor_quote_required_for_ingredients: hasVendorQuoteIngredientCosts,
+    vendor_quote_ingredient_names: vendorQuoteIngredientNames,
     pricing_basis:
-      "Estimated bulk active ingredient cost only. Not a final customer quote and excludes overage, yield loss, freight, testing, labor, packaging, margin, taxes, and current procurement confirmation.",
+      hasVendorQuoteIngredientCosts
+        ? "Some ingredients require vendor quote. Estimated pricing uses all currently priced ingredients and excludes vendor-quote items until procurement confirms cost."
+        : "Estimated bulk active ingredient cost only. Not a final customer quote and excludes overage, yield loss, freight, testing, labor, packaging, margin, taxes, and current procurement confirmation.",
     pectin_recommendation: pectinRecommendation,
     pectin_reason: pectinReason,
     rd_requirement: rdRequirement,
@@ -792,6 +821,8 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
       complexity_fee: complexityFee,
       rd_fee: rdFee,
       mold_cost: moldCost,
+      vendor_quote_required: hasVendorQuoteIngredientCosts,
+      vendor_quote_ingredient_names: vendorQuoteIngredientNames,
       pricing_data_complete: pricingDataComplete,
       pricing_note:
         "Estimated only. Not a final commercial quote. Excludes final procurement confirmation, testing, freight, taxes, yield adjustment, and commercial approval.",
@@ -997,6 +1028,10 @@ export default function GummiesQuotePage() {
           regulatory_review_required:
             definition?.regulatory_review_required === true,
           bulk_price_usd_per_kg: definition?.bulk_price_usd_per_kg ?? null,
+          price_per_kg_usd: definition?.price_per_kg_usd ?? null,
+          price_confidence: definition?.price_confidence ?? null,
+          vendor_quote_required:
+            definition?.price_confidence === "needs_vendor_quote",
           estimated_raw_cost_per_serving:
             getIngredientCostPerServing(ingredient),
           estimated_raw_cost_per_gummy:
@@ -1060,8 +1095,8 @@ export default function GummiesQuotePage() {
       title="Configure a gummy quote request"
       description="Build a structured gummy concept, review feasibility signals, and submit the configuration for technical and commercial review."
     >
-      <section className="mx-auto grid w-full max-w-7xl gap-6 px-5 py-10 sm:px-8 lg:grid-cols-[1fr_0.42fr] lg:px-10 lg:py-14">
-        <form onSubmit={handleSubmit} className="grid gap-6">
+      <section className="mx-auto grid w-full max-w-7xl items-start gap-6 px-5 py-8 sm:px-8 lg:grid-cols-[1fr_0.42fr] lg:px-10 lg:py-10">
+        <form onSubmit={handleSubmit} className="grid content-start gap-5">
           {submitted ? (
             <div className="border border-emerald-200 bg-emerald-50 p-4">
               <p className="text-base font-semibold text-emerald-950">
@@ -1147,7 +1182,7 @@ export default function GummiesQuotePage() {
                 onChange={(event) =>
                   updateField("special_requests", event.target.value)
                 }
-                className={`${fieldClass} min-h-28`}
+                className={`${fieldClass} min-h-20`}
                 placeholder="Custom flavor profile, color target, texture expectations, allergen considerations, or formula notes."
               />
             </FieldLabel>
@@ -1425,7 +1460,7 @@ export default function GummiesQuotePage() {
               <textarea
                 value={values.notes}
                 onChange={(event) => updateField("notes", event.target.value)}
-                className={`${fieldClass} min-h-28`}
+                className={`${fieldClass} min-h-20`}
                 placeholder="Timeline requirements, known formulation concerns, target market, or technical questions."
               />
             </FieldLabel>
@@ -1447,6 +1482,10 @@ export default function GummiesQuotePage() {
           <h2 className="mt-3 text-2xl font-semibold text-zinc-950">
             Technical signals
           </h2>
+          <p className="mt-3 text-sm leading-6 text-zinc-600">
+            Estimated pricing only. Final quote requires vendor confirmation
+            and technical review.
+          </p>
           <div className="mt-6 grid gap-4">
             <PricingQuoteCard
               label="Estimated Price Per Gummy"
@@ -1497,8 +1536,19 @@ export default function GummiesQuotePage() {
             <PreviewItem
               label="Active Cost"
               value={formatCurrency(preview.pricing_engine.active_cost)}
-              note="Estimated only. Customer-supplied and unpriced ingredients may be excluded."
+              note={
+                preview.vendor_quote_required_for_ingredients
+                  ? "Some ingredients require vendor quote and are excluded from active cost until confirmed."
+                  : "Estimated only. Customer-supplied and unpriced ingredients may be excluded."
+              }
             />
+            {preview.vendor_quote_required_for_ingredients ? (
+              <PreviewItem
+                label="Vendor Quote Ingredients"
+                value="Some ingredients require vendor quote"
+                note={preview.vendor_quote_ingredient_names.join(", ")}
+              />
+            ) : null}
             <PreviewItem
               label="Overhead Cost"
               value={formatCurrency(preview.pricing_engine.overhead_cost)}
@@ -1526,7 +1576,7 @@ export default function GummiesQuotePage() {
               )}
               note={
                 preview.has_unpriced_ingredient_costs
-                  ? "Some custom, IU-based, CFU-based, unmatched, or customer-supplied ingredients are not included."
+                  ? preview.pricing_basis
                   : preview.pricing_basis
               }
             />
