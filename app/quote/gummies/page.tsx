@@ -369,6 +369,32 @@ function formatCurrency(value: number | null) {
   return `$${value.toFixed(2)}`;
 }
 
+function formatCurrencyWithDecimals(value: number | null, decimals: number) {
+  if (value === null) {
+    return "Not enough priced mg-based data";
+  }
+
+  return `$${value.toFixed(decimals)}`;
+}
+
+function formatPerGummyPrice(value: number | null) {
+  return formatCurrencyWithDecimals(value, 4);
+}
+
+function formatServingPrice(value: number | null) {
+  if (value === null) {
+    return "Not enough priced mg-based data";
+  }
+
+  return value < 1
+    ? formatCurrencyWithDecimals(value, 4)
+    : formatCurrencyWithDecimals(value, 2);
+}
+
+function formatTotalPrice(value: number | null) {
+  return formatCurrencyWithDecimals(value, 2);
+}
+
 function getActiveCostFallbackMessage({
   activeCount,
   pricedIngredientCount,
@@ -400,6 +426,18 @@ function formatMainPricingValue(value: number | null, activeCount: number) {
   }
 
   return formatCurrencyWithFallback(value, "Not enough priced mg-based data");
+}
+
+function formatMainPricingValueWith(
+  value: number | null,
+  activeCount: number,
+  formatter: (value: number | null) => string,
+) {
+  if (activeCount === 0) {
+    return formatter(0);
+  }
+
+  return formatter(value);
 }
 
 function getMainPricingNote(activeCount: number, note: string) {
@@ -1641,13 +1679,14 @@ export default function GummiesQuotePage() {
           <div className="mt-6 grid gap-4">
             <PricingQuoteCard
               label="Estimated Price Per Gummy"
-              value={formatMainPricingValue(
+              value={formatMainPricingValueWith(
                 preview.pricing_engine.estimated_price_per_gummy,
                 preview.pricing_engine.active_count,
+                formatPerGummyPrice,
               )}
               note={getMainPricingNote(
                 preview.pricing_engine.active_count,
-                "Estimated only. Includes active cost, gummy overhead, active complexity fee, and applied margin.",
+                "Calculated from precise unit cost × total gummies. Estimated only. Includes active cost, gummy overhead, active complexity fee, and applied margin.",
               )}
             />
             <PricingQuoteCard
@@ -1671,20 +1710,22 @@ export default function GummiesQuotePage() {
             />
             <PreviewItem
               label="Cost Per Serving"
-              value={formatMainPricingValue(
+              value={formatMainPricingValueWith(
                 preview.cost_per_serving,
                 preview.pricing_engine.active_count,
+                formatServingPrice,
               )}
               note={getMainPricingNote(
                 preview.pricing_engine.active_count,
-                "Estimated only.",
+                "Calculated from precise unit cost × total gummies. Estimated only.",
               )}
             />
             <PreviewItem
               label="Estimated Total Cost"
-              value={formatMainPricingValue(
+              value={formatMainPricingValueWith(
                 preview.pricing_engine.total_cost,
                 preview.pricing_engine.active_count,
+                formatTotalPrice,
               )}
               note={
                 preview.pricing_engine.active_count === 0
@@ -1698,13 +1739,14 @@ export default function GummiesQuotePage() {
             />
             <PreviewItem
               label="Estimated Total Price"
-              value={formatMainPricingValue(
+              value={formatMainPricingValueWith(
                 preview.pricing_engine.final_price,
                 preview.pricing_engine.active_count,
+                formatTotalPrice,
               )}
               note={getMainPricingNote(
                 preview.pricing_engine.active_count,
-                "Estimated only. Commercial quote still requires review.",
+                "Calculated from precise unit cost × total gummies. Estimated only. Commercial quote still requires review.",
               )}
             />
             <PreviewItem
@@ -1712,10 +1754,11 @@ export default function GummiesQuotePage() {
               value={
                 preview.pricing_engine.bulk_packaging_selected
                   ? "N/A for bulk"
-                  : formatMainPricingValue(
+                  : formatMainPricingValueWith(
                       preview.pricing_engine
                         .estimated_final_price_with_bottle_packaging,
                       preview.pricing_engine.active_count,
+                      formatTotalPrice,
                     )
               }
               note={
