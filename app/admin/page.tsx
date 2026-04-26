@@ -14,6 +14,9 @@ type AccessRequest = {
   company_name: string;
   business_email: string;
   status: AccessRequestStatus;
+  activation_token: string | null;
+  activated: boolean | null;
+  activated_at: string | null;
   created_at: string;
 };
 
@@ -23,10 +26,12 @@ const tableHeaders = [
   "Business Email",
   "Status",
   "Created",
+  "Activation Link",
   "Review",
 ];
 
 const ADMIN_SESSION_KEY = "gummynology_admin_session";
+const ACTIVATION_BASE_URL = "https://quote.gummynology.com/activate";
 
 function formatDate(value: string) {
   if (!value) {
@@ -49,6 +54,20 @@ function statusClass(status: AccessRequestStatus) {
   }
 
   return "border-amber-200 bg-amber-50 text-amber-800";
+}
+
+function generateActivationToken() {
+  const values = new Uint8Array(32);
+  window.crypto.getRandomValues(values);
+
+  return btoa(String.fromCharCode(...values))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function getActivationLink(token: string) {
+  return `${ACTIVATION_BASE_URL}?token=${encodeURIComponent(token)}`;
 }
 
 export default function AdminPage() {
@@ -78,7 +97,7 @@ export default function AdminPage() {
     const { data, error } = await supabase
       .from("access_requests")
       .select(
-        "id, first_name, last_name, company_name, business_email, status, created_at",
+        "id, first_name, last_name, company_name, business_email, status, activation_token, activated, activated_at, created_at",
       )
       .order("created_at", { ascending: false });
 
@@ -108,9 +127,20 @@ export default function AdminPage() {
     setUpdatingId(request.id);
     setErrorMessage("");
 
+    const updatePayload =
+      nextStatus === "approved"
+        ? {
+            status: nextStatus,
+            activation_token:
+              request.activation_token || generateActivationToken(),
+            activated: false,
+            activated_at: null,
+          }
+        : { status: nextStatus };
+
     const { error } = await supabase
       .from("access_requests")
-      .update({ status: nextStatus })
+      .update(updatePayload)
       .eq("id", request.id);
 
     setUpdatingId(null);
@@ -122,7 +152,7 @@ export default function AdminPage() {
 
     setRequests((current) =>
       current.map((item) =>
-        item.id === request.id ? { ...item, status: nextStatus } : item,
+        item.id === request.id ? { ...item, ...updatePayload } : item,
       ),
     );
   }
@@ -257,7 +287,7 @@ export default function AdminPage() {
 
           {!isLoading && requests.length > 0 ? (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[920px] border-collapse text-left">
+              <table className="w-full min-w-[1180px] border-collapse text-left">
                 <thead className="bg-zinc-50">
                   <tr>
                     {tableHeaders.map((header) => (
@@ -307,6 +337,25 @@ export default function AdminPage() {
                           <p className="text-sm text-zinc-700">
                             {formatDate(request.created_at)}
                           </p>
+                        </td>
+                        <td className="px-5 py-4">
+                          {request.status === "approved" &&
+                          request.activation_token ? (
+                            <div className="max-w-sm">
+                              <p className="break-all text-xs leading-5 text-zinc-700">
+                                {getActivationLink(request.activation_token)}
+                              </p>
+                              <p className="mt-2 text-xs font-semibold text-emerald-800">
+                                {request.activated
+                                  ? "Activated"
+                                  : "Ready to copy"}
+                              </p>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-zinc-500">
+                              Approve to generate link
+                            </p>
+                          )}
                         </td>
                         <td className="px-5 py-4">
                           <div className="flex flex-wrap gap-2">
