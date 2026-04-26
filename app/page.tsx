@@ -1,3 +1,4 @@
+
 const productTypes = [
   "Gummies",
   "Capsules",
@@ -37,22 +38,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#f7f6f1] text-zinc-950">
       <section className="border-b border-zinc-200 bg-white">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-10 px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
-          <nav className="flex items-center justify-between gap-4">
-            <a
-              href="https://www.gummynology.com"
-              className="text-base font-semibold tracking-[0.18em] text-zinc-950 uppercase"
-            >
-              Gummynology
-            </a>
-            <a
-              href="/request-access"
-              className="hidden rounded-sm border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-emerald-700 hover:text-emerald-800 sm:inline-flex"
-            >
-              Request Access
-            </a>
-          </nav>
-
+        <div className="mx-auto flex w-full max-w-7xl flex-col px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
           <div className="grid gap-10 py-10 lg:grid-cols-[1.08fr_0.92fr] lg:items-center lg:py-16">
             <div className="max-w-3xl">
               <p className="mb-5 text-sm font-semibold tracking-[0.22em] text-emerald-800 uppercase">
