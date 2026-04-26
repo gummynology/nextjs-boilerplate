@@ -289,7 +289,7 @@ function IngredientSearchField({
               onClick={() => setIsOpen(false)}
               className="block w-full border-b border-zinc-100 px-3 py-3 text-left text-sm font-semibold text-emerald-900 hover:bg-emerald-50"
             >
-              Add custom ingredient: "{query.trim()}"
+              Add custom ingredient: {query.trim()}
             </button>
           ) : null}
 
@@ -353,6 +353,56 @@ function formatCurrency(value: number | null) {
   }
 
   return `$${value.toFixed(2)}`;
+}
+
+function formatPercent(value: number | null) {
+  if (value === null) {
+    return "Not enough order data";
+  }
+
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatKg(value: number | null) {
+  if (value === null) {
+    return "not enough order data";
+  }
+
+  return `${Number(value.toFixed(value >= 100 ? 0 : 2))} kg`;
+}
+
+function parseGummyWeight(value: string) {
+  const weight = Number(value.replace("g", ""));
+
+  return Number.isFinite(weight) && weight > 0 ? weight : null;
+}
+
+function getMarginForKg(totalKg: number | null) {
+  if (totalKg === null) {
+    return null;
+  }
+
+  if (totalKg >= 3000) {
+    return 0.4;
+  }
+
+  if (totalKg >= 1500) {
+    return 0.5;
+  }
+
+  if (totalKg >= 1200) {
+    return 0.55;
+  }
+
+  if (totalKg >= 900) {
+    return 0.6;
+  }
+
+  if (totalKg >= 600) {
+    return 0.65;
+  }
+
+  return 0.7;
 }
 
 function getIngredientCostPerServing(ingredient: IngredientCostInput) {
@@ -507,6 +557,7 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
       : totalRawActiveCostPerServing / servingDivisor;
   const countPerUnit = Number(values.count_per_unit);
   const quantity = Number(values.quantity);
+  const gummyWeightG = parseGummyWeight(values.gummy_weight);
   const estimatedRawActiveCostPerUnit =
     totalRawActiveCostPerGummy !== null &&
     Number.isFinite(countPerUnit) &&
@@ -526,6 +577,11 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
     values.base_type === "Low Sugar Pectin" ||
     values.base_type === "Sugar Free Pectin";
   const ingredientReview = getIngredientReviewData(ingredients);
+  const activeCount = ingredients.filter(
+    (ingredient) =>
+      ingredient.ingredient_name.trim() ||
+      ingredient.amount_per_serving.trim(),
+  ).length;
   const hasDifficultActives =
     containsDifficultTerms(ingredients, values.notes) ||
     ingredientReview.requires_rd_review ||
@@ -593,6 +649,88 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
   const customMoldLeadTimeNote = values.custom_mold
     ? "Custom mold selected. Add 8+ weeks for mold development and approval."
     : "Standard shape or existing mold selected.";
+  const overheadPerGram = 0.0048;
+  const overheadPerGummy =
+    gummyWeightG === null ? null : gummyWeightG * overheadPerGram;
+  const extraActiveFeePerGummy =
+    activeCount > 3 ? (activeCount - 3) * 0.001 : 0;
+  const activeCostPerGummyForPricing = totalRawActiveCostPerGummy ?? 0;
+  const baseCostPerGummy =
+    overheadPerGummy === null
+      ? null
+      : activeCostPerGummyForPricing +
+        overheadPerGummy +
+        extraActiveFeePerGummy;
+  const requestedTotalGummies =
+    Number.isFinite(quantity) && quantity > 0 ? quantity : null;
+  const requestedTotalKg =
+    gummyWeightG !== null && requestedTotalGummies !== null
+      ? (gummyWeightG * requestedTotalGummies) / 1000
+      : null;
+  const appliedTotalKg =
+    requestedTotalKg === null ? null : Math.max(requestedTotalKg, 300);
+  const moqApplied = requestedTotalKg !== null && requestedTotalKg < 300;
+  const pricedTotalGummies =
+    gummyWeightG !== null && appliedTotalKg !== null
+      ? Math.ceil((appliedTotalKg * 1000) / gummyWeightG)
+      : null;
+  const margin = getMarginForKg(appliedTotalKg);
+  const estimatedTotalCost =
+    baseCostPerGummy !== null && pricedTotalGummies !== null
+      ? baseCostPerGummy * pricedTotalGummies
+      : null;
+  const finalPrice =
+    estimatedTotalCost !== null && margin !== null
+      ? estimatedTotalCost * (1 + margin)
+      : null;
+  const estimatedPricePerGummy =
+    finalPrice !== null && pricedTotalGummies !== null && pricedTotalGummies > 0
+      ? finalPrice / pricedTotalGummies
+      : null;
+  const bottlePackagingLaborPerUnit = 1;
+  const estimatedPricePerBottle =
+    estimatedPricePerGummy !== null &&
+    Number.isFinite(countPerUnit) &&
+    countPerUnit > 0
+      ? estimatedPricePerGummy * countPerUnit + bottlePackagingLaborPerUnit
+      : null;
+  const bottleCount =
+    pricedTotalGummies !== null &&
+    Number.isFinite(countPerUnit) &&
+    countPerUnit > 0
+      ? Math.ceil(pricedTotalGummies / countPerUnit)
+      : null;
+  const estimatedBottlePackagingLaborCost =
+    bottleCount === null ? null : bottleCount * bottlePackagingLaborPerUnit;
+  const estimatedFinalPriceWithBottles =
+    finalPrice !== null && estimatedBottlePackagingLaborCost !== null
+      ? finalPrice + estimatedBottlePackagingLaborCost
+      : null;
+  const overheadCost =
+    overheadPerGummy !== null && pricedTotalGummies !== null
+      ? overheadPerGummy * pricedTotalGummies
+      : null;
+  const activeCost =
+    totalRawActiveCostPerGummy !== null && pricedTotalGummies !== null
+      ? totalRawActiveCostPerGummy * pricedTotalGummies
+      : null;
+  const complexityFee =
+    pricedTotalGummies !== null
+      ? extraActiveFeePerGummy * pricedTotalGummies
+      : null;
+  const rdFee =
+    activeCount > 4 ||
+    values.base_type === "Sugar Free Pectin" ||
+    ingredientReview.mineral_heavy ||
+    ingredientReview.oil_soluble ||
+    isHighActiveLoad
+      ? 5000
+      : 2500;
+  const moldCost = values.custom_mold ? 15000 : 0;
+  const pricingDataComplete =
+    gummyWeightG !== null &&
+    requestedTotalGummies !== null &&
+    totalRawActiveCostPerGummy !== null;
 
   return {
     recommended_serving_size: recommendedServingSize,
@@ -623,6 +761,52 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
     matched_ingredient_flags: ingredientReview.matched_ingredient_flags,
     technical_review_required:
       rdRequired || recommendedServingSize === "4+ gummies",
+    pricing_engine: {
+      label: "Estimated only",
+      gummy_weight_g: gummyWeightG,
+      overhead_per_gram: overheadPerGram,
+      overhead_per_gummy: overheadPerGummy,
+      active_count: activeCount,
+      extra_active_fee_per_gummy: extraActiveFeePerGummy,
+      active_cost_per_gummy: totalRawActiveCostPerGummy,
+      base_cost_per_gummy: baseCostPerGummy,
+      requested_total_gummies: requestedTotalGummies,
+      requested_total_kg: requestedTotalKg,
+      moq_applied: moqApplied,
+      applied_total_kg: appliedTotalKg,
+      adjusted_total_gummies: pricedTotalGummies,
+      margin,
+      total_cost: estimatedTotalCost,
+      final_price: finalPrice,
+      estimated_price_per_gummy: estimatedPricePerGummy,
+      count_per_bottle: Number.isFinite(countPerUnit) ? countPerUnit : null,
+      bottle_packaging_labor_per_unit: bottlePackagingLaborPerUnit,
+      estimated_price_per_bottle: estimatedPricePerBottle,
+      estimated_bottle_count: bottleCount,
+      estimated_bottle_packaging_labor_cost:
+        estimatedBottlePackagingLaborCost,
+      estimated_final_price_with_bottle_packaging:
+        estimatedFinalPriceWithBottles,
+      active_cost: activeCost,
+      overhead_cost: overheadCost,
+      complexity_fee: complexityFee,
+      rd_fee: rdFee,
+      mold_cost: moldCost,
+      pricing_data_complete: pricingDataComplete,
+      pricing_note:
+        "Estimated only. Not a final commercial quote. Excludes final procurement confirmation, testing, freight, taxes, yield adjustment, and commercial approval.",
+    },
+    cost_per_gummy: estimatedPricePerGummy,
+    cost_per_serving:
+      estimatedPricePerGummy === null
+        ? null
+        : estimatedPricePerGummy * servingDivisor,
+    price_per_bottle: estimatedPricePerBottle,
+    total_cost: estimatedTotalCost,
+    final_price: finalPrice,
+    margin,
+    rd_fee: rdFee,
+    mold_cost: moldCost,
   };
 }
 
@@ -790,10 +974,11 @@ export default function GummiesQuotePage() {
           ingredient.amount_per_serving.trim() ||
           ingredient.notes.trim(),
       )
-      .map(({ id: _id, ...ingredient }) => ({
-        ...ingredient,
+      .map((ingredient) => ({
         ingredient_name: ingredient.ingredient_name.trim(),
         amount_per_serving: ingredient.amount_per_serving.trim(),
+        unit: ingredient.unit,
+        customer_supplied: ingredient.customer_supplied,
         notes: ingredient.notes.trim(),
       }))
       .map((ingredient) => {
@@ -842,6 +1027,14 @@ export default function GummiesQuotePage() {
         project_name: values.project_name.trim(),
         count_per_unit: Number(values.count_per_unit),
         quantity: Number(values.quantity),
+        cost_per_gummy: preview.cost_per_gummy,
+        cost_per_serving: preview.cost_per_serving,
+        price_per_bottle: preview.price_per_bottle,
+        total_cost: preview.total_cost,
+        final_price: preview.final_price,
+        margin: preview.margin,
+        rd_fee: preview.rd_fee,
+        mold_cost: preview.mold_cost,
         active_ingredients: normalizedIngredients,
         active_ingredient_review: getIngredientReviewData(ingredients),
         feasibility_preview: preview,
@@ -1255,6 +1448,77 @@ export default function GummiesQuotePage() {
             Technical signals
           </h2>
           <div className="mt-6 grid gap-4">
+            <PricingQuoteCard
+              label="Estimated Price Per Gummy"
+              value={formatCurrency(preview.pricing_engine.estimated_price_per_gummy)}
+              note="Estimated only. Includes active cost, gummy overhead, active complexity fee, and applied margin."
+            />
+            <PricingQuoteCard
+              label="Estimated Price Per Bottle"
+              value={formatCurrency(preview.pricing_engine.estimated_price_per_bottle)}
+              note="Estimated only. Includes gummies per bottle plus $1.00 bottle, cap, and labor charge."
+            />
+            <PreviewItem
+              label="Cost Per Serving"
+              value={formatCurrency(preview.cost_per_serving)}
+              note="Estimated only."
+            />
+            <PreviewItem
+              label="Estimated Total Cost"
+              value={formatCurrency(preview.pricing_engine.total_cost)}
+              note={
+                preview.pricing_engine.moq_applied
+                  ? `Estimated only. 300kg MOQ applied from ${formatKg(
+                      preview.pricing_engine.requested_total_kg,
+                    )}.`
+                  : "Estimated only. Uses requested gummy count."
+              }
+            />
+            <PreviewItem
+              label="Estimated Total Price"
+              value={formatCurrency(preview.pricing_engine.final_price)}
+              note="Estimated only. Commercial quote still requires review."
+            />
+            <PreviewItem
+              label="Estimated Bottle-Included Total"
+              value={formatCurrency(
+                preview.pricing_engine
+                  .estimated_final_price_with_bottle_packaging,
+              )}
+              note="Estimated only. Adds $1.00 per bottle for bottle, cap, and labor."
+            />
+            <PreviewItem
+              label="Applied Margin"
+              value={formatPercent(preview.pricing_engine.margin)}
+              note={`Estimated only. Pricing weight: ${formatKg(
+                preview.pricing_engine.applied_total_kg,
+              )}.`}
+            />
+            <PreviewItem
+              label="Active Cost"
+              value={formatCurrency(preview.pricing_engine.active_cost)}
+              note="Estimated only. Customer-supplied and unpriced ingredients may be excluded."
+            />
+            <PreviewItem
+              label="Overhead Cost"
+              value={formatCurrency(preview.pricing_engine.overhead_cost)}
+              note="Estimated only. Uses $0.0048 per gram per gummy."
+            />
+            <PreviewItem
+              label="Complexity Fee"
+              value={formatCurrency(preview.pricing_engine.complexity_fee)}
+              note={`Estimated only. ${preview.pricing_engine.active_count} active ingredient(s) configured.`}
+            />
+            <PreviewItem
+              label="R&D Fee"
+              value={formatCurrency(preview.pricing_engine.rd_fee)}
+              note="Estimated only. Higher complexity, sugar-free, minerals, oil-soluble actives, or high active load use $5,000."
+            />
+            <PreviewItem
+              label="Mold Cost"
+              value={formatCurrency(preview.pricing_engine.mold_cost)}
+              note="Estimated only. Custom mold projects use $15,000."
+            />
             <PreviewItem
               label="Estimated Raw Active Cost Per Gummy"
               value={formatCurrency(
@@ -1330,6 +1594,28 @@ export default function GummiesQuotePage() {
         </aside>
       </section>
     </QuoteAccessShell>
+  );
+}
+
+function PricingQuoteCard({
+  label,
+  value,
+  note,
+}: {
+  label: string;
+  value: string;
+  note: string;
+}) {
+  return (
+    <div className="border border-emerald-800 bg-emerald-950 p-5 text-white">
+      <p className="text-xs font-semibold tracking-[0.16em] text-emerald-100 uppercase">
+        {label}
+      </p>
+      <p className="mt-3 text-3xl font-semibold leading-none sm:text-4xl">
+        {value}
+      </p>
+      <p className="mt-3 text-sm leading-6 text-emerald-50">{note}</p>
+    </div>
   );
 }
 
