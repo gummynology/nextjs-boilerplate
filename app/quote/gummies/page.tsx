@@ -71,6 +71,17 @@ const weightOptionsByShape: Record<string, string[]> = {
   Custom: ["Custom"],
 };
 const baseTypeOptions = ["Pectin", "Sugar Free Pectin", "Low Sugar Pectin"];
+const baseSystemEstimates: Record<
+  string,
+  { multiplier: number; pectin_component_usd_per_kg: number }
+> = {
+  Pectin: { multiplier: 1, pectin_component_usd_per_kg: 15 },
+  "Low Sugar Pectin": { multiplier: 1.08, pectin_component_usd_per_kg: 22 },
+  "Sugar Free Pectin": {
+    multiplier: 1.15,
+    pectin_component_usd_per_kg: 22,
+  },
+};
 const flavorOptions = [
   "Mixed Berry",
   "Strawberry",
@@ -358,6 +369,31 @@ function formatCurrency(value: number | null) {
   return `$${value.toFixed(2)}`;
 }
 
+function getActiveCostFallbackMessage({
+  activeCount,
+  pricedIngredientCount,
+}: {
+  activeCount: number;
+  pricedIngredientCount: number;
+}) {
+  if (activeCount === 0) {
+    return "Add active ingredients to estimate active cost.";
+  }
+
+  if (pricedIngredientCount === 0) {
+    return "Not enough priced mg-based data";
+  }
+
+  return "Not enough order data";
+}
+
+function formatCurrencyWithFallback(
+  value: number | null,
+  fallbackMessage: string,
+) {
+  return value === null ? fallbackMessage : formatCurrency(value);
+}
+
 function formatPercent(value: number | null) {
   if (value === null) {
     return "Not enough order data";
@@ -607,6 +643,11 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
       ingredient.ingredient_name.trim() ||
       ingredient.amount_per_serving.trim(),
   ).length;
+  const pricedIngredientCount = pricedIngredientCostLines.length;
+  const activeCostFallbackMessage = getActiveCostFallbackMessage({
+    activeCount,
+    pricedIngredientCount,
+  });
   const hasDifficultActives =
     containsDifficultTerms(ingredients, values.notes) ||
     ingredientReview.requires_rd_review ||
@@ -677,15 +718,27 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
   const overheadPerGram = 0.0048;
   const overheadPerGummy =
     gummyWeightG === null ? null : gummyWeightG * overheadPerGram;
+  const baseSystemEstimate = baseSystemEstimates[values.base_type] ?? {
+    multiplier: 1,
+    pectin_component_usd_per_kg: 15,
+  };
   const extraActiveFeePerGummy =
     activeCount > 3 ? (activeCount - 3) * 0.001 : 0;
   const activeCostPerGummyForPricing = totalRawActiveCostPerGummy ?? 0;
-  const baseCostPerGummy =
+  const unadjustedBaseCostPerGummy =
     overheadPerGummy === null
       ? null
       : activeCostPerGummyForPricing +
         overheadPerGummy +
         extraActiveFeePerGummy;
+  const baseCostPerGummy =
+    unadjustedBaseCostPerGummy === null
+      ? null
+      : unadjustedBaseCostPerGummy * baseSystemEstimate.multiplier;
+  const baseSystemAdjustmentPerGummy =
+    unadjustedBaseCostPerGummy === null
+      ? null
+      : unadjustedBaseCostPerGummy * (baseSystemEstimate.multiplier - 1);
   const requestedTotalGummies =
     Number.isFinite(quantity) && quantity > 0 ? quantity : null;
   const requestedTotalKg =
@@ -712,21 +765,29 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
     finalPrice !== null && pricedTotalGummies !== null && pricedTotalGummies > 0
       ? finalPrice / pricedTotalGummies
       : null;
-  const bottlePackagingLaborPerUnit = 1;
+  const isBulkPackaging = values.packaging_type === "Bulk";
+  const bottlePackagingLaborPerUnit = isBulkPackaging ? 0 : 1;
   const estimatedPricePerBottle =
-    estimatedPricePerGummy !== null &&
-    Number.isFinite(countPerUnit) &&
-    countPerUnit > 0
-      ? estimatedPricePerGummy * countPerUnit + bottlePackagingLaborPerUnit
-      : null;
+    isBulkPackaging
+      ? 0
+      : estimatedPricePerGummy !== null &&
+          Number.isFinite(countPerUnit) &&
+          countPerUnit > 0
+        ? estimatedPricePerGummy * countPerUnit + bottlePackagingLaborPerUnit
+        : null;
   const bottleCount =
+    !isBulkPackaging &&
     pricedTotalGummies !== null &&
     Number.isFinite(countPerUnit) &&
     countPerUnit > 0
       ? Math.ceil(pricedTotalGummies / countPerUnit)
       : null;
   const estimatedBottlePackagingLaborCost =
-    bottleCount === null ? null : bottleCount * bottlePackagingLaborPerUnit;
+    isBulkPackaging
+      ? 0
+      : bottleCount === null
+        ? null
+        : bottleCount * bottlePackagingLaborPerUnit;
   const estimatedFinalPriceWithBottles =
     finalPrice !== null && estimatedBottlePackagingLaborCost !== null
       ? finalPrice + estimatedBottlePackagingLaborCost
@@ -736,7 +797,9 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
       ? overheadPerGummy * pricedTotalGummies
       : null;
   const activeCost =
-    pricedTotalGummies !== null
+    activeCount === 0 || pricedIngredientCount === 0
+      ? null
+      : pricedTotalGummies !== null
       ? activeCostPerGummyForPricing * pricedTotalGummies
       : null;
   const complexityFee =
@@ -793,11 +856,18 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
     pricing_engine: {
       label: "Estimated only",
       gummy_weight_g: gummyWeightG,
+      base_type: values.base_type,
+      base_system_multiplier: baseSystemEstimate.multiplier,
+      base_system_pectin_component_usd_per_kg:
+        baseSystemEstimate.pectin_component_usd_per_kg,
       overhead_per_gram: overheadPerGram,
       overhead_per_gummy: overheadPerGummy,
       active_count: activeCount,
+      priced_ingredient_count: pricedIngredientCount,
       extra_active_fee_per_gummy: extraActiveFeePerGummy,
       active_cost_per_gummy: totalRawActiveCostPerGummy,
+      unadjusted_base_cost_per_gummy: unadjustedBaseCostPerGummy,
+      base_system_adjustment_per_gummy: baseSystemAdjustmentPerGummy,
       base_cost_per_gummy: baseCostPerGummy,
       requested_total_gummies: requestedTotalGummies,
       requested_total_kg: requestedTotalKg,
@@ -809,6 +879,8 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
       final_price: finalPrice,
       estimated_price_per_gummy: estimatedPricePerGummy,
       count_per_bottle: Number.isFinite(countPerUnit) ? countPerUnit : null,
+      packaging_type: values.packaging_type,
+      bulk_packaging_selected: isBulkPackaging,
       bottle_packaging_labor_per_unit: bottlePackagingLaborPerUnit,
       estimated_price_per_bottle: estimatedPricePerBottle,
       estimated_bottle_count: bottleCount,
@@ -823,6 +895,7 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
       mold_cost: moldCost,
       vendor_quote_required: hasVendorQuoteIngredientCosts,
       vendor_quote_ingredient_names: vendorQuoteIngredientNames,
+      active_cost_fallback_message: activeCostFallbackMessage,
       pricing_data_complete: pricingDataComplete,
       pricing_note:
         "Estimated only. Not a final commercial quote. Excludes final procurement confirmation, testing, freight, taxes, yield adjustment, and commercial approval.",
@@ -1178,11 +1251,12 @@ export default function GummiesQuotePage() {
             />
             <FieldLabel label="Special Requests" fullWidth>
               <textarea
+                rows={1}
                 value={values.special_requests}
                 onChange={(event) =>
                   updateField("special_requests", event.target.value)
                 }
-                className={`${fieldClass} min-h-20`}
+                className={`${fieldClass} h-11 min-h-11 resize-y`}
                 placeholder="Custom flavor profile, color target, texture expectations, allergen considerations, or formula notes."
               />
             </FieldLabel>
@@ -1458,9 +1532,10 @@ export default function GummiesQuotePage() {
             />
             <FieldLabel label="Notes" fullWidth>
               <textarea
+                rows={1}
                 value={values.notes}
                 onChange={(event) => updateField("notes", event.target.value)}
-                className={`${fieldClass} min-h-20`}
+                className={`${fieldClass} h-11 min-h-11 resize-y`}
                 placeholder="Timeline requirements, known formulation concerns, target market, or technical questions."
               />
             </FieldLabel>
@@ -1489,22 +1564,42 @@ export default function GummiesQuotePage() {
           <div className="mt-6 grid gap-4">
             <PricingQuoteCard
               label="Estimated Price Per Gummy"
-              value={formatCurrency(preview.pricing_engine.estimated_price_per_gummy)}
+              value={formatCurrencyWithFallback(
+                preview.pricing_engine.estimated_price_per_gummy,
+                preview.pricing_engine.active_cost_fallback_message,
+              )}
               note="Estimated only. Includes active cost, gummy overhead, active complexity fee, and applied margin."
             />
             <PricingQuoteCard
               label="Estimated Price Per Bottle"
-              value={formatCurrency(preview.pricing_engine.estimated_price_per_bottle)}
-              note="Estimated only. Includes gummies per bottle plus $1.00 bottle, cap, and labor charge."
+              value={
+                preview.pricing_engine.bulk_packaging_selected
+                  ? "N/A for bulk"
+                  : formatCurrencyWithFallback(
+                      preview.pricing_engine.estimated_price_per_bottle,
+                      preview.pricing_engine.active_cost_fallback_message,
+                    )
+              }
+              note={
+                preview.pricing_engine.bulk_packaging_selected
+                  ? "Bulk packaging selected. Bottle, cap, and bottle labor are not added."
+                  : "Estimated only. Includes gummies per bottle plus $1.00 bottle, cap, and labor charge."
+              }
             />
             <PreviewItem
               label="Cost Per Serving"
-              value={formatCurrency(preview.cost_per_serving)}
+              value={formatCurrencyWithFallback(
+                preview.cost_per_serving,
+                preview.pricing_engine.active_cost_fallback_message,
+              )}
               note="Estimated only."
             />
             <PreviewItem
               label="Estimated Total Cost"
-              value={formatCurrency(preview.pricing_engine.total_cost)}
+              value={formatCurrencyWithFallback(
+                preview.pricing_engine.total_cost,
+                preview.pricing_engine.active_cost_fallback_message,
+              )}
               note={
                 preview.pricing_engine.moq_applied
                   ? `Estimated only. 300kg MOQ applied from ${formatKg(
@@ -1515,16 +1610,24 @@ export default function GummiesQuotePage() {
             />
             <PreviewItem
               label="Estimated Total Price"
-              value={formatCurrency(preview.pricing_engine.final_price)}
+              value={formatCurrencyWithFallback(
+                preview.pricing_engine.final_price,
+                preview.pricing_engine.active_cost_fallback_message,
+              )}
               note="Estimated only. Commercial quote still requires review."
             />
             <PreviewItem
               label="Estimated Bottle-Included Total"
-              value={formatCurrency(
+              value={formatCurrencyWithFallback(
                 preview.pricing_engine
                   .estimated_final_price_with_bottle_packaging,
+                preview.pricing_engine.active_cost_fallback_message,
               )}
-              note="Estimated only. Adds $1.00 per bottle for bottle, cap, and labor."
+              note={
+                preview.pricing_engine.bulk_packaging_selected
+                  ? "Bulk packaging selected. No bottle, cap, or bottle labor charge added."
+                  : "Estimated only. Adds $1.00 per bottle for bottle, cap, and labor."
+              }
             />
             <PreviewItem
               label="Applied Margin"
@@ -1535,7 +1638,10 @@ export default function GummiesQuotePage() {
             />
             <PreviewItem
               label="Active Cost"
-              value={formatCurrency(preview.pricing_engine.active_cost)}
+              value={formatCurrencyWithFallback(
+                preview.pricing_engine.active_cost,
+                preview.pricing_engine.active_cost_fallback_message,
+              )}
               note={
                 preview.vendor_quote_required_for_ingredients
                   ? "Some ingredients require vendor quote and are excluded from active cost until confirmed."
@@ -1551,28 +1657,48 @@ export default function GummiesQuotePage() {
             ) : null}
             <PreviewItem
               label="Overhead Cost"
-              value={formatCurrency(preview.pricing_engine.overhead_cost)}
+              value={formatCurrencyWithFallback(
+                preview.pricing_engine.overhead_cost,
+                "Select gummy weight and quantity to estimate overhead.",
+              )}
               note="Estimated only. Uses $0.0048 per gram per gummy."
             />
             <PreviewItem
+              label="Base System Adjustment"
+              value={`${preview.pricing_engine.base_system_multiplier.toFixed(
+                2,
+              )}x`}
+              note={`Estimated only. ${preview.pricing_engine.base_type || "Pectin"} uses a pectin component estimate of $${preview.pricing_engine.base_system_pectin_component_usd_per_kg}/kg.`}
+            />
+            <PreviewItem
               label="Complexity Fee"
-              value={formatCurrency(preview.pricing_engine.complexity_fee)}
+              value={formatCurrencyWithFallback(
+                preview.pricing_engine.complexity_fee,
+                "Select gummy weight and quantity to estimate complexity fee.",
+              )}
               note={`Estimated only. ${preview.pricing_engine.active_count} active ingredient(s) configured.`}
             />
             <PreviewItem
               label="R&D Fee"
-              value={formatCurrency(preview.pricing_engine.rd_fee)}
+              value={formatCurrencyWithFallback(
+                preview.pricing_engine.rd_fee,
+                "Not enough configuration data",
+              )}
               note="Estimated only. Higher complexity, sugar-free, minerals, oil-soluble actives, or high active load use $5,000."
             />
             <PreviewItem
               label="Mold Cost"
-              value={formatCurrency(preview.pricing_engine.mold_cost)}
+              value={formatCurrencyWithFallback(
+                preview.pricing_engine.mold_cost,
+                "Not enough configuration data",
+              )}
               note="Estimated only. Custom mold projects use $15,000."
             />
             <PreviewItem
               label="Estimated Raw Active Cost Per Gummy"
-              value={formatCurrency(
+              value={formatCurrencyWithFallback(
                 preview.estimated_raw_active_cost_per_gummy,
+                preview.pricing_engine.active_cost_fallback_message,
               )}
               note={
                 preview.has_unpriced_ingredient_costs
@@ -1582,13 +1708,17 @@ export default function GummiesQuotePage() {
             />
             <PreviewItem
               label="Estimated Raw Active Cost Per Unit"
-              value={formatCurrency(preview.estimated_raw_active_cost_per_unit)}
+              value={formatCurrencyWithFallback(
+                preview.estimated_raw_active_cost_per_unit,
+                preview.pricing_engine.active_cost_fallback_message,
+              )}
               note="Uses count per unit when available. This is active raw material only, not finished goods pricing."
             />
             <PreviewItem
               label="Estimated Raw Active Cost For Order"
-              value={formatCurrency(
+              value={formatCurrencyWithFallback(
                 preview.estimated_raw_active_cost_for_order,
+                preview.pricing_engine.active_cost_fallback_message,
               )}
               note="Uses quantity and count per unit when available. Final quote still requires purchasing and production review."
             />
