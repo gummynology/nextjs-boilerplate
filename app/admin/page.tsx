@@ -1,7 +1,7 @@
+
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 
@@ -200,42 +200,27 @@ export default function AdminPage() {
   return (
     <main className="min-h-screen bg-[#f7f6f1] text-zinc-950">
       <section className="border-b border-zinc-200 bg-white">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
-          <nav className="flex items-center justify-between gap-4">
-            <Link
-              href="/"
-              className="text-base font-semibold tracking-[0.18em] text-zinc-950 uppercase"
-            >
-              Gummynology
-            </Link>
-            <div className="flex flex-wrap items-center justify-end gap-3">
-              <Link
-                href="/request-access"
-                className="rounded-sm border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-emerald-700 hover:text-emerald-800"
-              >
-                Request Access
-              </Link>
-              <button
-                type="button"
-                onClick={handleSignOut}
-                className="rounded-sm border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-red-700 hover:text-red-800"
-              >
-                Sign Out
-              </button>
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-5 py-10 sm:px-8 lg:px-10 lg:py-14">
+          <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+            <div className="max-w-4xl">
+              <p className="text-sm font-semibold tracking-[0.22em] text-emerald-800 uppercase">
+                Internal Review
+              </p>
+              <h1 className="mt-5 text-4xl font-semibold leading-tight tracking-normal text-zinc-950 sm:text-5xl">
+                Access request admin dashboard
+              </h1>
+              <p className="mt-5 max-w-3xl text-lg leading-8 text-zinc-700">
+                Review submitted company requests and update approval status for
+                the Gummynology quote system.
+              </p>
             </div>
-          </nav>
-
-          <div className="max-w-4xl py-6 lg:py-8">
-            <p className="text-sm font-semibold tracking-[0.22em] text-emerald-800 uppercase">
-              Internal Review
-            </p>
-            <h1 className="mt-5 text-4xl font-semibold leading-tight tracking-normal text-zinc-950 sm:text-5xl">
-              Access request admin dashboard
-            </h1>
-            <p className="mt-5 max-w-3xl text-lg leading-8 text-zinc-700">
-              Review submitted company requests and update approval status for
-              the Gummynology quote system.
-            </p>
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="inline-flex min-h-11 items-center justify-center rounded-sm border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-red-700 hover:text-red-800"
+            >
+              Sign Out
+            </button>
           </div>
         </div>
       </section>
