@@ -1,6 +1,11 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
+import {
+  activeIngredientSearchOptions,
+  findActiveIngredient,
+  type IngredientUnit,
+} from "@/lib/activeIngredients";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import QuoteAccessShell, {
   getStoredCustomerContext,
@@ -16,7 +21,7 @@ type ActiveIngredient = {
   id: string;
   ingredient_name: string;
   amount_per_serving: string;
-  unit: "mg" | "mcg" | "g" | "IU";
+  unit: IngredientUnit;
   customer_supplied: "yes" | "no";
   notes: string;
 };
@@ -228,6 +233,49 @@ function containsDifficultTerms(ingredients: ActiveIngredient[], notes: string) 
   return difficultIngredientTerms.some((term) => searchable.includes(term));
 }
 
+function getIngredientReviewData(ingredients: ActiveIngredient[]) {
+  const matches = ingredients
+    .map((ingredient) => {
+      const definition = findActiveIngredient(ingredient.ingredient_name);
+
+      if (!definition) {
+        return null;
+      }
+
+      return {
+        entered_name: ingredient.ingredient_name.trim(),
+        matched_name: definition.name,
+        category: definition.category,
+        gummy_suitability: definition.gummy_suitability,
+        taste_risk: definition.taste_risk,
+        heat_sensitivity: definition.heat_sensitivity,
+        oil_soluble: definition.oil_soluble,
+        mineral_heavy: definition.mineral_heavy,
+        requires_rd_review: definition.requires_rd_review,
+        regulatory_review_required:
+          definition.regulatory_review_required === true,
+        notes: definition.notes,
+      };
+    })
+    .filter((match) => match !== null);
+
+  return {
+    matched_ingredient_flags: matches,
+    requires_rd_review: matches.some((match) => match.requires_rd_review),
+    regulatory_review_required: matches.some(
+      (match) => match.regulatory_review_required,
+    ),
+    automatic_quote_approval_eligible: !matches.some(
+      (match) => match.regulatory_review_required,
+    ),
+    mineral_heavy: matches.some((match) => match.mineral_heavy),
+    oil_soluble: matches.some((match) => match.oil_soluble),
+    high_heat_sensitivity: matches.some(
+      (match) => match.heat_sensitivity === "high",
+    ),
+  };
+}
+
 function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]) {
   const convertedAmounts = ingredients.map(toMg).filter((amount) => amount !== null);
   const hasUnconvertedAmounts = ingredients.some(
@@ -262,7 +310,13 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
   const isLowOrSugarFree =
     values.base_type === "Low Sugar Pectin" ||
     values.base_type === "Sugar Free Pectin";
-  const hasDifficultActives = containsDifficultTerms(ingredients, values.notes);
+  const ingredientReview = getIngredientReviewData(ingredients);
+  const hasDifficultActives =
+    containsDifficultTerms(ingredients, values.notes) ||
+    ingredientReview.requires_rd_review ||
+    ingredientReview.mineral_heavy ||
+    ingredientReview.oil_soluble ||
+    ingredientReview.high_heat_sensitivity;
   const isHighActiveLoad =
     activeMgPerGummy !== null ? activeMgPerGummy > 250 : false;
   const isVeryHighActiveLoad =
@@ -290,6 +344,7 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
         : "Recommended for high complexity, mineral-sensitive, calcium-sensitive, or sugar-free systems requiring R&D review.";
 
   const rdRequired =
+    ingredientReview.regulatory_review_required ||
     isVeryHighActiveLoad ||
     hasDifficultActives ||
     values.special_requests.toLowerCase().includes("custom formulation");
@@ -305,11 +360,13 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
       ? "R&D review likely"
       : "No R&D likely";
   const rdReason =
-    rdRequirement === "No R&D likely"
-      ? "Standard flavor, color, pectin base, and low active load appear feasible for standard review."
-      : rdRequirement === "R&D review likely"
-        ? "Custom selections, sugar profile, customer-supplied actives, or moderate active load should be reviewed before quote finalization."
-        : "Very high load, mineral-heavy, oil-soluble, unstable, difficult, or custom-formulation inputs require technical review.";
+    ingredientReview.regulatory_review_required
+      ? "Manual regulatory review required. Not eligible for automatic quote approval."
+      : rdRequirement === "No R&D likely"
+        ? "Standard flavor, color, pectin base, and low active load appear feasible for standard review."
+        : rdRequirement === "R&D review likely"
+          ? "Custom selections, sugar profile, customer-supplied actives, or moderate active load should be reviewed before quote finalization."
+          : "Very high load, mineral-heavy, oil-soluble, unstable, difficult, or custom-formulation inputs require technical review.";
   const leadTimeNote = values.custom_mold
     ? "Custom mold projects may add 8+ weeks before production timing can be finalized."
     : rdRequired || rdReviewLikely
@@ -334,7 +391,15 @@ function buildPreview(values: GummiesFormValues, ingredients: ActiveIngredient[]
     estimated_lead_time_note: leadTimeNote,
     rush_surcharge_note: rushSurchargeNote,
     custom_mold_lead_time_note: customMoldLeadTimeNote,
-    technical_review_required: rdRequired || recommendedServingSize === "4+ gummies",
+    regulatory_review_required: ingredientReview.regulatory_review_required,
+    regulatory_review_note: ingredientReview.regulatory_review_required
+      ? "Manual regulatory review required. Not eligible for automatic quote approval."
+      : "No restricted ingredient match detected.",
+    automatic_quote_approval_eligible:
+      ingredientReview.automatic_quote_approval_eligible,
+    matched_ingredient_flags: ingredientReview.matched_ingredient_flags,
+    technical_review_required:
+      rdRequired || recommendedServingSize === "4+ gummies",
   };
 }
 
@@ -381,9 +446,29 @@ export default function GummiesQuotePage() {
     value: ActiveIngredient[Key],
   ) {
     setIngredients((current) =>
-      current.map((ingredient) =>
-        ingredient.id === id ? { ...ingredient, [field]: value } : ingredient,
-      ),
+      current.map((ingredient) => {
+        if (ingredient.id !== id) {
+          return ingredient;
+        }
+
+        if (field === "ingredient_name" && typeof value === "string") {
+          const definition = findActiveIngredient(value);
+
+          if (definition) {
+            return {
+              ...ingredient,
+              ingredient_name: definition.name,
+              amount_per_serving:
+                ingredient.amount_per_serving ||
+                String(definition.default_dose),
+              unit: definition.unit,
+              notes: ingredient.notes || definition.notes,
+            };
+          }
+        }
+
+        return { ...ingredient, [field]: value };
+      }),
     );
     setSubmitError("");
     setSubmitted(false);
@@ -475,7 +560,25 @@ export default function GummiesQuotePage() {
         ingredient_name: ingredient.ingredient_name.trim(),
         amount_per_serving: ingredient.amount_per_serving.trim(),
         notes: ingredient.notes.trim(),
-      }));
+      }))
+      .map((ingredient) => {
+        const definition = findActiveIngredient(ingredient.ingredient_name);
+
+        return {
+          ...ingredient,
+          matched_ingredient_name: definition?.name ?? null,
+          category: definition?.category ?? null,
+          gummy_suitability: definition?.gummy_suitability ?? null,
+          taste_risk: definition?.taste_risk ?? null,
+          heat_sensitivity: definition?.heat_sensitivity ?? null,
+          oil_soluble: definition?.oil_soluble ?? false,
+          mineral_heavy: definition?.mineral_heavy ?? false,
+          requires_rd_review: definition?.requires_rd_review ?? false,
+          regulatory_review_required:
+            definition?.regulatory_review_required === true,
+          ingredient_library_notes: definition?.notes ?? null,
+        };
+      });
 
     const { error } = await supabase.from("quote_requests").insert({
       dosage_form: "gummies",
@@ -491,6 +594,7 @@ export default function GummiesQuotePage() {
         count_per_unit: Number(values.count_per_unit),
         quantity: Number(values.quantity),
         active_ingredients: normalizedIngredients,
+        active_ingredient_review: getIngredientReviewData(ingredients),
         feasibility_preview: preview,
       },
       created_at: new Date().toISOString(),
@@ -609,6 +713,15 @@ export default function GummiesQuotePage() {
 
           <QuoteSection title="Active Ingredient Builder">
             <div className="sm:col-span-2">
+              <datalist id="active-ingredient-options">
+                {activeIngredientSearchOptions.map((option) => (
+                  <option
+                    key={`${option.value}-${option.label}`}
+                    value={option.value}
+                    label={option.label}
+                  />
+                ))}
+              </datalist>
               <div className="hidden gap-3 border-b border-zinc-200 pb-2 text-xs font-semibold tracking-[0.12em] text-zinc-500 uppercase lg:grid lg:grid-cols-[1.25fr_0.72fr_0.52fr_0.72fr_1.35fr_0.45fr]">
                 <span>Ingredient</span>
                 <span>Amount</span>
@@ -618,133 +731,164 @@ export default function GummiesQuotePage() {
                 <span>Action</span>
               </div>
               <div className="mt-3 grid gap-3">
-                {ingredients.map((ingredient, index) => (
-                  <div
-                    key={ingredient.id}
-                    className="border border-zinc-200 bg-zinc-50 p-3"
-                  >
-                    <div className="mb-3 flex items-center justify-between gap-3 lg:hidden">
-                      <h3 className="text-sm font-semibold text-zinc-950">
-                        Ingredient {index + 1}
-                      </h3>
-                      <button
-                        type="button"
-                        onClick={() => removeIngredient(ingredient.id)}
-                        disabled={ingredients.length === 1}
-                        className="inline-flex min-h-10 items-center justify-center rounded-sm border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-red-700 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.25fr_0.72fr_0.52fr_0.72fr_1.35fr_0.45fr] lg:items-end">
-                      <label>
-                        <span className="text-xs font-semibold text-zinc-700 lg:hidden">
-                          Ingredient
-                        </span>
-                        <input
-                          type="text"
-                          value={ingredient.ingredient_name}
-                          onChange={(event) =>
-                            updateIngredient(
-                              ingredient.id,
-                              "ingredient_name",
-                              event.target.value,
-                            )
-                          }
-                          className={fieldClass}
-                          placeholder="Example: Vitamin C"
-                        />
-                      </label>
-                      <label>
-                        <span className="text-xs font-semibold text-zinc-700 lg:hidden">
-                          Amount
-                        </span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={ingredient.amount_per_serving}
-                          onChange={(event) =>
-                            updateIngredient(
-                              ingredient.id,
-                              "amount_per_serving",
-                              event.target.value,
-                            )
-                          }
-                          className={fieldClass}
-                          placeholder="100"
-                        />
-                      </label>
-                      <label>
-                        <span className="text-xs font-semibold text-zinc-700 lg:hidden">
-                          Unit
-                        </span>
-                        <select
-                          value={ingredient.unit}
-                          onChange={(event) =>
-                            updateIngredient(
-                              ingredient.id,
-                              "unit",
-                              event.target.value as ActiveIngredient["unit"],
-                            )
-                          }
-                          className={fieldClass}
+                {ingredients.map((ingredient, index) => {
+                  const matchedIngredient = findActiveIngredient(
+                    ingredient.ingredient_name,
+                  );
+
+                  return (
+                    <div
+                      key={ingredient.id}
+                      className="border border-zinc-200 bg-zinc-50 p-3"
+                    >
+                      <div className="mb-3 flex items-center justify-between gap-3 lg:hidden">
+                        <h3 className="text-sm font-semibold text-zinc-950">
+                          Ingredient {index + 1}
+                        </h3>
+                        <button
+                          type="button"
+                          onClick={() => removeIngredient(ingredient.id)}
+                          disabled={ingredients.length === 1}
+                          className="inline-flex min-h-10 items-center justify-center rounded-sm border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-red-700 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40"
                         >
-                          <option value="mg">mg</option>
-                          <option value="mcg">mcg</option>
-                          <option value="g">g</option>
-                          <option value="IU">IU</option>
-                        </select>
-                      </label>
-                      <label>
-                        <span className="text-xs font-semibold text-zinc-700 lg:hidden">
-                          Supplied
-                        </span>
-                        <select
-                          value={ingredient.customer_supplied}
-                          onChange={(event) =>
-                            updateIngredient(
-                              ingredient.id,
-                              "customer_supplied",
-                              event.target
-                                .value as ActiveIngredient["customer_supplied"],
-                            )
-                          }
-                          className={fieldClass}
+                          Remove
+                        </button>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.25fr_0.72fr_0.52fr_0.72fr_1.35fr_0.45fr] lg:items-end">
+                        <label>
+                          <span className="text-xs font-semibold text-zinc-700 lg:hidden">
+                            Ingredient
+                          </span>
+                          <input
+                            type="text"
+                            list="active-ingredient-options"
+                            value={ingredient.ingredient_name}
+                            onChange={(event) =>
+                              updateIngredient(
+                                ingredient.id,
+                                "ingredient_name",
+                                event.target.value,
+                              )
+                            }
+                            className={fieldClass}
+                            placeholder="Search ingredient or alias"
+                          />
+                        </label>
+                        <label>
+                          <span className="text-xs font-semibold text-zinc-700 lg:hidden">
+                            Amount
+                          </span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={ingredient.amount_per_serving}
+                            onChange={(event) =>
+                              updateIngredient(
+                                ingredient.id,
+                                "amount_per_serving",
+                                event.target.value,
+                              )
+                            }
+                            className={fieldClass}
+                            placeholder="100"
+                          />
+                        </label>
+                        <label>
+                          <span className="text-xs font-semibold text-zinc-700 lg:hidden">
+                            Unit
+                          </span>
+                          <select
+                            value={ingredient.unit}
+                            onChange={(event) =>
+                              updateIngredient(
+                                ingredient.id,
+                                "unit",
+                                event.target.value as ActiveIngredient["unit"],
+                              )
+                            }
+                            className={fieldClass}
+                          >
+                            <option value="mg">mg</option>
+                            <option value="mcg">mcg</option>
+                            <option value="g">g</option>
+                            <option value="IU">IU</option>
+                            <option value="billion CFU">billion CFU</option>
+                          </select>
+                        </label>
+                        <label>
+                          <span className="text-xs font-semibold text-zinc-700 lg:hidden">
+                            Supplied
+                          </span>
+                          <select
+                            value={ingredient.customer_supplied}
+                            onChange={(event) =>
+                              updateIngredient(
+                                ingredient.id,
+                                "customer_supplied",
+                                event.target
+                                  .value as ActiveIngredient["customer_supplied"],
+                              )
+                            }
+                            className={fieldClass}
+                          >
+                            <option value="no">No</option>
+                            <option value="yes">Yes</option>
+                          </select>
+                        </label>
+                        <label className="sm:col-span-2 lg:col-span-1">
+                          <span className="text-xs font-semibold text-zinc-700 lg:hidden">
+                            Notes
+                          </span>
+                          <input
+                            type="text"
+                            value={ingredient.notes}
+                            onChange={(event) =>
+                              updateIngredient(
+                                ingredient.id,
+                                "notes",
+                                event.target.value,
+                              )
+                            }
+                            className={fieldClass}
+                            placeholder="Source, taste, solubility, stability"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => removeIngredient(ingredient.id)}
+                          disabled={ingredients.length === 1}
+                          className="hidden min-h-12 items-center justify-center rounded-sm border border-zinc-300 bg-white px-3 py-3 text-sm font-semibold text-zinc-800 transition hover:border-red-700 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40 lg:inline-flex"
                         >
-                          <option value="no">No</option>
-                          <option value="yes">Yes</option>
-                        </select>
-                      </label>
-                      <label className="sm:col-span-2 lg:col-span-1">
-                        <span className="text-xs font-semibold text-zinc-700 lg:hidden">
-                          Notes
-                        </span>
-                        <input
-                          type="text"
-                          value={ingredient.notes}
-                          onChange={(event) =>
-                            updateIngredient(
-                              ingredient.id,
-                              "notes",
-                              event.target.value,
-                            )
-                          }
-                          className={fieldClass}
-                          placeholder="Source, taste, solubility, stability"
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => removeIngredient(ingredient.id)}
-                        disabled={ingredients.length === 1}
-                        className="hidden min-h-12 items-center justify-center rounded-sm border border-zinc-300 bg-white px-3 py-3 text-sm font-semibold text-zinc-800 transition hover:border-red-700 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40 lg:inline-flex"
-                      >
-                        Remove
-                      </button>
+                          Remove
+                        </button>
+                      </div>
+                      {matchedIngredient ? (
+                        <div
+                          className={`mt-3 border p-3 text-xs leading-5 ${
+                            matchedIngredient.regulatory_review_required
+                              ? "border-red-200 bg-red-50 text-red-900"
+                              : "border-zinc-200 bg-white text-zinc-600"
+                          }`}
+                        >
+                          <span className="font-semibold text-zinc-900">
+                            {matchedIngredient.name}
+                          </span>
+                          {" | "}
+                          {matchedIngredient.category}
+                          {" | "}
+                          {matchedIngredient.notes}
+                          {matchedIngredient.regulatory_review_required ? (
+                            <span className="mt-1 block font-semibold">
+                              Manual regulatory review required. Not eligible
+                              for automatic quote approval.
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <button
                 type="button"
@@ -879,6 +1023,15 @@ export default function GummiesQuotePage() {
               label="R&D Requirement"
               value={preview.rd_requirement}
               note={preview.rd_reason}
+            />
+            <PreviewItem
+              label="Regulatory Review"
+              value={
+                preview.regulatory_review_required
+                  ? "Required"
+                  : "No restricted ingredient match"
+              }
+              note={preview.regulatory_review_note}
             />
             <PreviewItem
               label="Estimated Lead Time Note"
