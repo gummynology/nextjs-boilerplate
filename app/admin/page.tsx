@@ -76,6 +76,8 @@ export default function AdminPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isCheckingAccess, setIsCheckingAccess] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [warningMessage, setWarningMessage] = useState("");
   const [updatingId, setUpdatingId] = useState<number | string | null>(null);
 
   async function loadRequests({ showLoading = true } = {}) {
@@ -93,6 +95,8 @@ export default function AdminPage() {
       setIsLoading(true);
     }
     setErrorMessage("");
+    setSuccessMessage("");
+    setWarningMessage("");
 
     const { data, error } = await supabase
       .from("access_requests")
@@ -126,13 +130,17 @@ export default function AdminPage() {
 
     setUpdatingId(request.id);
     setErrorMessage("");
+    setSuccessMessage("");
+    setWarningMessage("");
+
+    const activationToken =
+      request.activation_token || generateActivationToken();
 
     const updatePayload =
       nextStatus === "approved"
         ? {
             status: nextStatus,
-            activation_token:
-              request.activation_token || generateActivationToken(),
+            activation_token: activationToken,
             activated: false,
             activated_at: null,
           }
@@ -143,9 +151,8 @@ export default function AdminPage() {
       .update(updatePayload)
       .eq("id", request.id);
 
-    setUpdatingId(null);
-
     if (error) {
+      setUpdatingId(null);
       setErrorMessage(error.message || "Unable to update request status.");
       return;
     }
@@ -155,6 +162,43 @@ export default function AdminPage() {
         item.id === request.id ? { ...item, ...updatePayload } : item,
       ),
     );
+
+    if (nextStatus === "approved") {
+      try {
+        const response = await fetch("/api/send-access-email", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: request.business_email,
+            first_name: request.first_name,
+            activation_token: activationToken,
+          }),
+        });
+
+        const result = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+
+        if (!response.ok) {
+          setWarningMessage(
+            result?.error ||
+              "Access was approved, but the activation email could not be sent. Copy the activation link and send it manually.",
+          );
+        } else {
+          setSuccessMessage(
+            `Access approved and activation email sent to ${request.business_email}.`,
+          );
+        }
+      } catch {
+        setWarningMessage(
+          "Access was approved, but the activation email request failed. Copy the activation link and send it manually.",
+        );
+      }
+    }
+
+    setUpdatingId(null);
   }
 
   useEffect(() => {
@@ -258,6 +302,22 @@ export default function AdminPage() {
             <div className="m-5 border border-red-200 bg-red-50 p-4 sm:m-6">
               <p className="text-sm font-semibold text-red-900">
                 {errorMessage}
+              </p>
+            </div>
+          ) : null}
+
+          {successMessage ? (
+            <div className="m-5 border border-emerald-200 bg-emerald-50 p-4 sm:m-6">
+              <p className="text-sm font-semibold text-emerald-900">
+                {successMessage}
+              </p>
+            </div>
+          ) : null}
+
+          {warningMessage ? (
+            <div className="m-5 border border-amber-200 bg-amber-50 p-4 sm:m-6">
+              <p className="text-sm font-semibold text-amber-900">
+                {warningMessage}
               </p>
             </div>
           ) : null}
