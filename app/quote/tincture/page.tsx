@@ -13,6 +13,8 @@ import {
 } from "../_components/QuoteField";
 
 const initialValues = {
+  product_name: "",
+  project_name: "",
   extract_type: "",
   solvent_type: "",
   alcohol_content: "",
@@ -111,6 +113,8 @@ export default function TinctureQuotePage() {
       dosage_form: "tincture",
       customer_email: customerEmail,
       company_name: customerCompany,
+      product_name: values.product_name,
+      project_name: values.project_name,
       status: "new",
       module_data: {
         ...values,
@@ -157,6 +161,28 @@ export default function TinctureQuotePage() {
           ) : null}
 
           <QuoteSection title="Product Basics">
+            <FieldLabel label="Product Name">
+              <input
+                required
+                type="text"
+                value={values.product_name}
+                onChange={(event) =>
+                  updateField("product_name", event.target.value)
+                }
+                className={fieldClass}
+              />
+            </FieldLabel>
+            <FieldLabel label="Project Name">
+              <input
+                required
+                type="text"
+                value={values.project_name}
+                onChange={(event) =>
+                  updateField("project_name", event.target.value)
+                }
+                className={fieldClass}
+              />
+            </FieldLabel>
             <SelectField
               label="Extract Type"
               value={values.extract_type}

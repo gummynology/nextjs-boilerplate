@@ -13,6 +13,8 @@ import {
 } from "../_components/QuoteField";
 
 const initialValues = {
+  product_name: "",
+  project_name: "",
   shape: "",
   weight: "",
   base_type: "",
@@ -117,6 +119,8 @@ export default function GummiesQuotePage() {
       dosage_form: "gummies",
       customer_email: customerEmail,
       company_name: customerCompany,
+      product_name: values.product_name,
+      project_name: values.project_name,
       status: "new",
       module_data: {
         ...values,
@@ -163,6 +167,28 @@ export default function GummiesQuotePage() {
           ) : null}
 
           <QuoteSection title="Product Basics">
+            <FieldLabel label="Product Name">
+              <input
+                required
+                type="text"
+                value={values.product_name}
+                onChange={(event) =>
+                  updateField("product_name", event.target.value)
+                }
+                className={fieldClass}
+              />
+            </FieldLabel>
+            <FieldLabel label="Project Name">
+              <input
+                required
+                type="text"
+                value={values.project_name}
+                onChange={(event) =>
+                  updateField("project_name", event.target.value)
+                }
+                className={fieldClass}
+              />
+            </FieldLabel>
             <SelectField
               label="Shape"
               value={values.shape}
