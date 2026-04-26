@@ -53,7 +53,14 @@ const initialValues = {
 type GummiesFormValues = typeof initialValues;
 
 const shapeOptions = ["Bear", "Drop", "Square", "Berry", "Coin", "Custom"];
-const weightOptions = ["2.25g", "3g", "5g", "Custom"];
+const weightOptionsByShape: Record<string, string[]> = {
+  Bear: ["2.25g", "3g"],
+  Drop: ["2.5g"],
+  Square: ["3g", "3.5g", "4g"],
+  Berry: ["3g"],
+  Coin: ["5g", "5.5g", "6g", "6.5g", "7g"],
+  Custom: ["Custom"],
+};
 const baseTypeOptions = ["Pectin", "Sugar Free Pectin", "Low Sugar Pectin"];
 const flavorOptions = [
   "Mixed Berry",
@@ -72,8 +79,8 @@ const colorOptions = [
   "Natural Red",
   "Natural Orange",
   "Natural Yellow",
-  "Natural Green",
-  "Natural Blue/Purple",
+  "Green",
+  "Blue/Purple",
   "No Color",
   "Custom",
 ];
@@ -148,21 +155,26 @@ function SelectField({
   value,
   options,
   onChange,
+  disabled = false,
+  placeholder = "Select",
 }: {
   label: string;
   value: string;
   options: string[];
   onChange: (value: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
 }) {
   return (
     <FieldLabel label={label}>
       <select
         required
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         className={fieldClass}
       >
-        <option value="">Select</option>
+        <option value="">{placeholder}</option>
         {options.map((option) => (
           <option key={option} value={option}>
             {option}
@@ -339,12 +351,26 @@ export default function GummiesQuotePage() {
     () => buildPreview(values, ingredients),
     [values, ingredients],
   );
+  const availableWeightOptions = values.shape
+    ? (weightOptionsByShape[values.shape] ?? ["Custom"])
+    : [];
 
   function updateField<Key extends keyof GummiesFormValues>(
     field: Key,
     value: GummiesFormValues[Key],
   ) {
-    setValues((current) => ({ ...current, [field]: value }));
+    setValues((current) => {
+      if (field === "shape" && typeof value === "string") {
+        const nextWeights = weightOptionsByShape[value] ?? ["Custom"];
+        const nextWeight = nextWeights.includes(current.gummy_weight)
+          ? current.gummy_weight
+          : "";
+
+        return { ...current, shape: value, gummy_weight: nextWeight };
+      }
+
+      return { ...current, [field]: value };
+    });
     setSubmitError("");
     setSubmitted(false);
   }
@@ -532,16 +558,20 @@ export default function GummiesQuotePage() {
                 placeholder="Internal launch or customer project name"
               />
             </FieldLabel>
-            <OptionGroup
+            <SelectField
               label="Shape"
               value={values.shape}
               options={shapeOptions}
               onChange={(value) => updateField("shape", value)}
             />
-            <OptionGroup
+            <SelectField
               label="Gummy Weight"
               value={values.gummy_weight}
-              options={weightOptions}
+              options={availableWeightOptions}
+              disabled={!values.shape}
+              placeholder={
+                values.shape ? "Select gummy weight" : "Select shape first"
+              }
               onChange={(value) => updateField("gummy_weight", value)}
             />
             <OptionGroup
@@ -553,13 +583,13 @@ export default function GummiesQuotePage() {
           </QuoteSection>
 
           <QuoteSection title="Flavor and Color">
-            <OptionGroup
+            <SelectField
               label="Flavor"
               value={values.flavor}
               options={flavorOptions}
               onChange={(value) => updateField("flavor", value)}
             />
-            <OptionGroup
+            <SelectField
               label="Color"
               value={values.color}
               options={colorOptions}
