@@ -149,7 +149,6 @@ export const activeIngredients: ActiveIngredientDefinition[] = [
   },
   {
     name: "Zinc Citrate",
-    aliases: ["Zinc Sitrate"],
     category: "Mineral / Immune",
     common_dose_min: 5,
     common_dose_max: 15,
@@ -279,21 +278,29 @@ activeIngredients.forEach((ingredient) => {
   });
 });
 
-export const activeIngredientSearchOptions = activeIngredients.flatMap(
-  (ingredient) => [
-    {
-      value: ingredient.name,
-      label: ingredient.aliases?.length
-        ? `${ingredient.name} (${ingredient.aliases.join(", ")})`
-        : ingredient.name,
-    },
-    ...(ingredient.aliases ?? []).map((alias) => ({
-      value: alias,
-      label: `${alias} -> ${ingredient.name}`,
-    })),
-  ],
+export const uniqueActiveIngredients = Array.from(
+  new Map(activeIngredients.map((ingredient) => [ingredient.name, ingredient]))
+    .values(),
 );
 
 export function findActiveIngredient(value: string) {
   return ingredientLookup.get(normalizeIngredientName(value)) ?? null;
+}
+
+export function searchActiveIngredients(query: string) {
+  const normalizedQuery = normalizeIngredientName(query);
+
+  if (!normalizedQuery) {
+    return uniqueActiveIngredients;
+  }
+
+  return uniqueActiveIngredients.filter((ingredient) => {
+    const searchableValues = [
+      ingredient.name,
+      ingredient.category,
+      ...(ingredient.aliases ?? []),
+    ].map(normalizeIngredientName);
+
+    return searchableValues.some((value) => value.includes(normalizedQuery));
+  });
 }
