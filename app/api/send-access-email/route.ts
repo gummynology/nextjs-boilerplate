@@ -113,13 +113,21 @@ export async function POST(request: Request) {
     activationToken,
   )}`;
 
-  const { data, error } = await resend.emails.send({
-    from: FROM_EMAIL,
-    to: email,
-    subject: SUBJECT,
-    html: buildEmailHtml(firstName, activationLink),
-    text: buildEmailText(firstName, activationLink),
-  });
+  const { data, error } = await resend.emails
+    .send({
+      from: FROM_EMAIL,
+      to: email,
+      subject: SUBJECT,
+      html: buildEmailHtml(firstName, activationLink),
+      text: buildEmailText(firstName, activationLink),
+    })
+    .catch((sendError: unknown) => ({
+      data: null,
+      error:
+        sendError instanceof Error
+          ? sendError
+          : new Error("Unable to send activation email."),
+    }));
 
   if (error) {
     return NextResponse.json(
