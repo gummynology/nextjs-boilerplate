@@ -579,15 +579,23 @@ export default function GummiesQuotePage() {
 
           <QuoteSection title="Active Ingredient Builder">
             <div className="sm:col-span-2">
-              <div className="grid gap-4">
+              <div className="hidden gap-3 border-b border-zinc-200 pb-2 text-xs font-semibold tracking-[0.12em] text-zinc-500 uppercase lg:grid lg:grid-cols-[1.25fr_0.72fr_0.52fr_0.72fr_1.35fr_0.45fr]">
+                <span>Ingredient</span>
+                <span>Amount</span>
+                <span>Unit</span>
+                <span>Supplied</span>
+                <span>Notes</span>
+                <span>Action</span>
+              </div>
+              <div className="mt-3 grid gap-3">
                 {ingredients.map((ingredient, index) => (
                   <div
                     key={ingredient.id}
-                    className="border border-zinc-200 bg-zinc-50 p-4"
+                    className="border border-zinc-200 bg-zinc-50 p-3"
                   >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <h3 className="text-base font-semibold text-zinc-950">
-                        Active Ingredient {index + 1}
+                    <div className="mb-3 flex items-center justify-between gap-3 lg:hidden">
+                      <h3 className="text-sm font-semibold text-zinc-950">
+                        Ingredient {index + 1}
                       </h3>
                       <button
                         type="button"
@@ -598,8 +606,11 @@ export default function GummiesQuotePage() {
                         Remove
                       </button>
                     </div>
-                    <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-[1.2fr_0.8fr_0.7fr_0.8fr]">
-                      <FieldLabel label="Ingredient Name">
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.25fr_0.72fr_0.52fr_0.72fr_1.35fr_0.45fr] lg:items-end">
+                      <label>
+                        <span className="text-xs font-semibold text-zinc-700 lg:hidden">
+                          Ingredient
+                        </span>
                         <input
                           type="text"
                           value={ingredient.ingredient_name}
@@ -613,8 +624,11 @@ export default function GummiesQuotePage() {
                           className={fieldClass}
                           placeholder="Example: Vitamin C"
                         />
-                      </FieldLabel>
-                      <FieldLabel label="Amount Per Serving">
+                      </label>
+                      <label>
+                        <span className="text-xs font-semibold text-zinc-700 lg:hidden">
+                          Amount
+                        </span>
                         <input
                           type="number"
                           min="0"
@@ -630,8 +644,11 @@ export default function GummiesQuotePage() {
                           className={fieldClass}
                           placeholder="100"
                         />
-                      </FieldLabel>
-                      <FieldLabel label="Unit">
+                      </label>
+                      <label>
+                        <span className="text-xs font-semibold text-zinc-700 lg:hidden">
+                          Unit
+                        </span>
                         <select
                           value={ingredient.unit}
                           onChange={(event) =>
@@ -648,8 +665,11 @@ export default function GummiesQuotePage() {
                           <option value="g">g</option>
                           <option value="IU">IU</option>
                         </select>
-                      </FieldLabel>
-                      <FieldLabel label="Customer Supplied">
+                      </label>
+                      <label>
+                        <span className="text-xs font-semibold text-zinc-700 lg:hidden">
+                          Supplied
+                        </span>
                         <select
                           value={ingredient.customer_supplied}
                           onChange={(event) =>
@@ -665,9 +685,13 @@ export default function GummiesQuotePage() {
                           <option value="no">No</option>
                           <option value="yes">Yes</option>
                         </select>
-                      </FieldLabel>
-                      <FieldLabel label="Notes" fullWidth>
-                        <textarea
+                      </label>
+                      <label className="sm:col-span-2 lg:col-span-1">
+                        <span className="text-xs font-semibold text-zinc-700 lg:hidden">
+                          Notes
+                        </span>
+                        <input
+                          type="text"
                           value={ingredient.notes}
                           onChange={(event) =>
                             updateIngredient(
@@ -676,10 +700,18 @@ export default function GummiesQuotePage() {
                               event.target.value,
                             )
                           }
-                          className={`${fieldClass} min-h-24`}
-                          placeholder="Source, taste, solubility, stability, customer-supplied details, or handling requirements."
+                          className={fieldClass}
+                          placeholder="Source, taste, solubility, stability"
                         />
-                      </FieldLabel>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => removeIngredient(ingredient.id)}
+                        disabled={ingredients.length === 1}
+                        className="hidden min-h-12 items-center justify-center rounded-sm border border-zinc-300 bg-white px-3 py-3 text-sm font-semibold text-zinc-800 transition hover:border-red-700 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40 lg:inline-flex"
+                      >
+                        Remove
+                      </button>
                     </div>
                   </div>
                 ))}
