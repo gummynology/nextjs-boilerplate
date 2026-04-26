@@ -1,7 +1,7 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 
@@ -214,13 +214,21 @@ export default function AdminPage() {
                 the Gummynology quote system.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={handleSignOut}
-              className="inline-flex min-h-11 items-center justify-center rounded-sm border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-red-700 hover:text-red-800"
-            >
-              Sign Out
-            </button>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Link
+                href="/admin/pricing"
+                className="inline-flex min-h-11 items-center justify-center rounded-sm border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-emerald-700 hover:text-emerald-800"
+              >
+                Manage Raw Materials
+              </Link>
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="inline-flex min-h-11 items-center justify-center rounded-sm border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-red-700 hover:text-red-800"
+              >
+                Sign Out
+              </button>
+            </div>
           </div>
         </div>
       </section>
