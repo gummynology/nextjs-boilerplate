@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   findActiveIngredient,
+  getUniqueActiveIngredients,
   searchActiveIngredients,
   uniqueActiveIngredients,
   type ActiveIngredientDefinition,
@@ -39,6 +40,24 @@ type IngredientPrice = {
 
 type IngredientPriceMap = Record<string, IngredientPrice>;
 
+type SupabaseIngredientRow = {
+  name: string;
+  aliases: string[] | null;
+  category: string | null;
+  common_dose_min: number | null;
+  common_dose_max: number | null;
+  unit: IngredientUnit | string | null;
+  default_dose: number | null;
+  gummy_suitability: string | null;
+  taste_risk: string | null;
+  heat_sensitivity: string | null;
+  oil_soluble: boolean | null;
+  mineral_heavy: boolean | null;
+  requires_rd_review: boolean | null;
+  regulatory_review_required: boolean | null;
+  notes: string | null;
+};
+
 const createIngredient = (): ActiveIngredient => ({
   id: crypto.randomUUID(),
   ingredient_name: "",
@@ -47,6 +66,44 @@ const createIngredient = (): ActiveIngredient => ({
   customer_supplied: "no",
   notes: "",
 });
+
+function normalizeSupabaseIngredient(
+  row: SupabaseIngredientRow,
+): ActiveIngredientDefinition {
+  return {
+    name: String(row.name),
+    aliases: Array.isArray(row.aliases) ? row.aliases.map(String) : [],
+    category: row.category || "Uncategorized",
+    common_dose_min: Number(row.common_dose_min ?? 0),
+    common_dose_max: Number(row.common_dose_max ?? 0),
+    unit: (row.unit || "mg") as IngredientUnit,
+    default_dose: Number(row.default_dose ?? row.common_dose_min ?? 0),
+    gummy_suitability:
+      row.gummy_suitability === "low" ||
+      row.gummy_suitability === "medium" ||
+      row.gummy_suitability === "high" ||
+      row.gummy_suitability === "restricted"
+        ? row.gummy_suitability
+        : "medium",
+    taste_risk:
+      row.taste_risk === "low" ||
+      row.taste_risk === "medium" ||
+      row.taste_risk === "high"
+        ? row.taste_risk
+        : "medium",
+    heat_sensitivity:
+      row.heat_sensitivity === "low" ||
+      row.heat_sensitivity === "medium" ||
+      row.heat_sensitivity === "high"
+        ? row.heat_sensitivity
+        : "medium",
+    oil_soluble: row.oil_soluble === true,
+    mineral_heavy: row.mineral_heavy === true,
+    requires_rd_review: row.requires_rd_review === true,
+    regulatory_review_required: row.regulatory_review_required === true,
+    notes: row.notes || "",
+  };
+}
 
 const initialValues = {
   product_name: "",
@@ -216,21 +273,24 @@ function SelectField({
 
 function IngredientSearchField({
   ingredient,
+  ingredientDefinitions,
   selectedNames,
   onCustomChange,
   onSelectIngredient,
 }: {
   ingredient: ActiveIngredient;
+  ingredientDefinitions: ActiveIngredientDefinition[];
   selectedNames: string[];
   onCustomChange: (value: string) => void;
   onSelectIngredient: (definition: ActiveIngredientDefinition) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const query = ingredient.ingredient_name;
-  const results = searchActiveIngredients(query);
-  const matchedIngredient = findActiveIngredient(query);
+  const uniqueIngredients = getUniqueActiveIngredients(ingredientDefinitions);
+  const results = searchActiveIngredients(query, uniqueIngredients);
+  const matchedIngredient = findActiveIngredient(query, uniqueIngredients);
   const normalizedSelectedNames = selectedNames.map((name) =>
-    findActiveIngredient(name)?.name.toLowerCase(),
+    findActiveIngredient(name, uniqueIngredients)?.name.toLowerCase(),
   );
   const typedValueCanBeCustom =
     query.trim() && !matchedIngredient && results.length === 0;
@@ -319,8 +379,7 @@ function IngredientSearchField({
           ) : null}
 
           <div className="sticky bottom-0 border-t border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-500">
-            Showing {results.length} of {uniqueActiveIngredients.length}{" "}
-            ingredients
+            Showing {results.length} of {uniqueIngredients.length} ingredients
           </div>
         </div>
       ) : null}
@@ -529,8 +588,12 @@ function getIngredientPrice(
 function getIngredientCostPerServing(
   ingredient: IngredientCostInput,
   ingredientPrices: IngredientPriceMap,
+  ingredientDefinitions: ActiveIngredientDefinition[],
 ) {
-  const definition = findActiveIngredient(ingredient.ingredient_name);
+  const definition = findActiveIngredient(
+    ingredient.ingredient_name,
+    ingredientDefinitions,
+  );
   const price = getIngredientPrice(definition, ingredientPrices);
   const amountMg = toMg(ingredient);
 
@@ -569,10 +632,14 @@ function containsDifficultTerms(ingredients: ActiveIngredient[], notes: string) 
 function getIngredientReviewData(
   ingredients: ActiveIngredient[],
   ingredientPrices: IngredientPriceMap,
+  ingredientDefinitions: ActiveIngredientDefinition[],
 ) {
   const matches = ingredients
     .map((ingredient) => {
-      const definition = findActiveIngredient(ingredient.ingredient_name);
+      const definition = findActiveIngredient(
+        ingredient.ingredient_name,
+        ingredientDefinitions,
+      );
       const price = getIngredientPrice(definition, ingredientPrices);
 
       if (!definition) {
@@ -596,7 +663,11 @@ function getIngredientReviewData(
         vendor_quote_required:
           !price || price.price_confidence === "needs_vendor_quote",
         estimated_raw_cost_per_serving:
-          getIngredientCostPerServing(ingredient, ingredientPrices),
+          getIngredientCostPerServing(
+            ingredient,
+            ingredientPrices,
+            ingredientDefinitions,
+          ),
         notes: definition.notes,
       };
     })
@@ -623,6 +694,7 @@ function buildPreview(
   values: GummiesFormValues,
   ingredients: ActiveIngredient[],
   ingredientPrices: IngredientPriceMap,
+  ingredientDefinitions: ActiveIngredientDefinition[],
 ) {
   const convertedAmounts = ingredients.map(toMg).filter((amount) => amount !== null);
   const hasUnconvertedAmounts = ingredients.some(
@@ -661,12 +733,16 @@ function buildPreview(
         ingredient.amount_per_serving.trim(),
     )
     .map((ingredient) => {
-      const definition = findActiveIngredient(ingredient.ingredient_name);
+      const definition = findActiveIngredient(
+        ingredient.ingredient_name,
+        ingredientDefinitions,
+      );
       const price = getIngredientPrice(definition, ingredientPrices);
       const amountMg = toMg(ingredient);
       const costPerServing = getIngredientCostPerServing(
         ingredient,
         ingredientPrices,
+        ingredientDefinitions,
       );
 
       return {
@@ -746,7 +822,11 @@ function buildPreview(
   const isLowOrSugarFree =
     values.base_type === "Low Sugar Pectin" ||
     values.base_type === "Sugar Free Pectin";
-  const ingredientReview = getIngredientReviewData(ingredients, ingredientPrices);
+  const ingredientReview = getIngredientReviewData(
+    ingredients,
+    ingredientPrices,
+    ingredientDefinitions,
+  );
   const activeCount = ingredients.filter(
     (ingredient) =>
       ingredient.ingredient_name.trim() ||
@@ -1031,13 +1111,23 @@ export default function GummiesQuotePage() {
   const [ingredientPrices, setIngredientPrices] = useState<IngredientPriceMap>(
     {},
   );
+  const [ingredientDefinitions, setIngredientDefinitions] = useState<
+    ActiveIngredientDefinition[]
+  >(uniqueActiveIngredients);
   const [isLoadingIngredientPrices, setIsLoadingIngredientPrices] =
     useState(true);
   const [ingredientPriceError, setIngredientPriceError] = useState("");
+  const [ingredientMetadataNotice, setIngredientMetadataNotice] = useState("");
 
   const preview = useMemo(
-    () => buildPreview(values, ingredients, ingredientPrices),
-    [values, ingredients, ingredientPrices],
+    () =>
+      buildPreview(
+        values,
+        ingredients,
+        ingredientPrices,
+        ingredientDefinitions,
+      ),
+    [values, ingredients, ingredientPrices, ingredientDefinitions],
   );
   const availableWeightOptions = values.shape
     ? (weightOptionsByShape[values.shape] ?? ["Custom"])
@@ -1046,7 +1136,7 @@ export default function GummiesQuotePage() {
   useEffect(() => {
     let isMounted = true;
 
-    async function loadIngredientPrices() {
+    async function loadIngredientData() {
       const supabase = getSupabaseClient();
 
       if (!supabase) {
@@ -1059,25 +1149,48 @@ export default function GummiesQuotePage() {
         return;
       }
 
-      const { data, error } = await supabase
-        .from("ingredient_prices")
-        .select("name, price_per_kg_usd, price_confidence, notes")
-        .order("name", { ascending: true });
+      const [ingredientResponse, priceResponse] = await Promise.all([
+        supabase
+          .from("ingredients")
+          .select(
+            "name, aliases, category, common_dose_min, common_dose_max, unit, default_dose, gummy_suitability, taste_risk, heat_sensitivity, oil_soluble, mineral_heavy, requires_rd_review, regulatory_review_required, notes",
+          )
+          .order("name", { ascending: true }),
+        supabase
+          .from("ingredient_prices")
+          .select("name, price_per_kg_usd, price_confidence, notes")
+          .order("name", { ascending: true }),
+      ]);
 
       if (!isMounted) {
         return;
       }
 
-      if (error) {
+      if (!ingredientResponse.error && ingredientResponse.data?.length) {
+        setIngredientDefinitions(
+          getUniqueActiveIngredients(
+            ingredientResponse.data.map((row) =>
+              normalizeSupabaseIngredient(row as SupabaseIngredientRow),
+            ),
+          ),
+        );
+        setIngredientMetadataNotice("");
+      } else if (ingredientResponse.error) {
+        setIngredientMetadataNotice(
+          `${ingredientResponse.error.message}. Using local ingredient library fallback.`,
+        );
+      }
+
+      if (priceResponse.error) {
         setIngredientPriceError(
-          error.message || "Unable to load ingredient prices.",
+          priceResponse.error.message || "Unable to load ingredient prices.",
         );
         setIsLoadingIngredientPrices(false);
         return;
       }
 
       const nextPrices = Object.fromEntries(
-        (data || []).map((row) => [
+        (priceResponse.data || []).map((row) => [
           String(row.name).toLowerCase(),
           {
             name: String(row.name),
@@ -1095,7 +1208,7 @@ export default function GummiesQuotePage() {
       setIsLoadingIngredientPrices(false);
     }
 
-    loadIngredientPrices();
+    loadIngredientData();
 
     return () => {
       isMounted = false;
@@ -1138,7 +1251,7 @@ export default function GummiesQuotePage() {
         }
 
         if (field === "ingredient_name" && typeof value === "string") {
-          const definition = findActiveIngredient(value);
+          const definition = findActiveIngredient(value, ingredientDefinitions);
 
           if (definition) {
             return {
@@ -1212,7 +1325,10 @@ export default function GummiesQuotePage() {
 
     const canonicalIngredientNames = ingredients
       .map((ingredient) =>
-        findActiveIngredient(ingredient.ingredient_name)?.name.toLowerCase(),
+        findActiveIngredient(
+          ingredient.ingredient_name,
+          ingredientDefinitions,
+        )?.name.toLowerCase(),
       )
       .filter((name): name is string => Boolean(name));
 
@@ -1264,11 +1380,15 @@ export default function GummiesQuotePage() {
         notes: ingredient.notes.trim(),
       }))
       .map((ingredient) => {
-        const definition = findActiveIngredient(ingredient.ingredient_name);
+        const definition = findActiveIngredient(
+          ingredient.ingredient_name,
+          ingredientDefinitions,
+        );
         const price = getIngredientPrice(definition, ingredientPrices);
         const estimatedRawCostPerServing = getIngredientCostPerServing(
           ingredient,
           ingredientPrices,
+          ingredientDefinitions,
         );
 
         return {
@@ -1334,6 +1454,7 @@ export default function GummiesQuotePage() {
         active_ingredient_review: getIngredientReviewData(
           ingredients,
           ingredientPrices,
+          ingredientDefinitions,
         ),
         feasibility_preview: preview,
       },
@@ -1466,6 +1587,7 @@ export default function GummiesQuotePage() {
                 {ingredients.map((ingredient, index) => {
                   const matchedIngredient = findActiveIngredient(
                     ingredient.ingredient_name,
+                    ingredientDefinitions,
                   );
 
                   return (
@@ -1493,6 +1615,7 @@ export default function GummiesQuotePage() {
                           </span>
                           <IngredientSearchField
                             ingredient={ingredient}
+                            ingredientDefinitions={ingredientDefinitions}
                             selectedNames={ingredients
                               .filter((item) => item.id !== ingredient.id)
                               .map((item) => item.ingredient_name)}
@@ -1790,6 +1913,11 @@ export default function GummiesQuotePage() {
           {ingredientPriceError ? (
             <p className="mt-3 border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
               {ingredientPriceError}
+            </p>
+          ) : null}
+          {ingredientMetadataNotice ? (
+            <p className="mt-3 border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
+              {ingredientMetadataNotice}
             </p>
           ) : null}
           <div className="mt-6 grid gap-4">
