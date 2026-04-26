@@ -1,6 +1,6 @@
+
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
 
@@ -79,23 +79,8 @@ export default function QuoteAccessShell({
   return (
     <main className="min-h-screen bg-[#f7f6f1] text-zinc-950">
       <section className="border-b border-zinc-200 bg-white">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
-          <nav className="flex items-center justify-between gap-4">
-            <Link
-              href="/"
-              className="text-base font-semibold tracking-[0.18em] text-zinc-950 uppercase"
-            >
-              Gummynology
-            </Link>
-            <Link
-              href="/request-access"
-              className="rounded-sm border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-emerald-700 hover:text-emerald-800"
-            >
-              Request Access
-            </Link>
-          </nav>
-
-          <div className="max-w-4xl py-6 lg:py-8">
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-5 py-10 sm:px-8 lg:px-10 lg:py-14">
+          <div className="max-w-4xl">
             <p className="text-sm font-semibold tracking-[0.22em] text-emerald-800 uppercase">
               {eyebrow}
             </p>
