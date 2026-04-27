@@ -139,13 +139,26 @@ const weightOptionsByShape: Record<string, string[]> = {
 const baseTypeOptions = ["Pectin", "Sugar Free Pectin", "Low Sugar Pectin"];
 const baseSystemEstimates: Record<
   string,
-  { multiplier: number; pectin_component_usd_per_kg: number }
+  {
+    multiplier: number;
+    pectin_component_usd_per_kg: number;
+    base_cost_cents_per_g: number;
+  }
 > = {
-  Pectin: { multiplier: 1, pectin_component_usd_per_kg: 15 },
-  "Low Sugar Pectin": { multiplier: 1.08, pectin_component_usd_per_kg: 22 },
+  Pectin: {
+    multiplier: 1,
+    pectin_component_usd_per_kg: 15,
+    base_cost_cents_per_g: 0.3,
+  },
+  "Low Sugar Pectin": {
+    multiplier: 1.08,
+    pectin_component_usd_per_kg: 22,
+    base_cost_cents_per_g: 0.39,
+  },
   "Sugar Free Pectin": {
     multiplier: 1.15,
     pectin_component_usd_per_kg: 22,
+    base_cost_cents_per_g: 0.433,
   },
 };
 const flavorOptions = [
@@ -559,26 +572,26 @@ function getMarginForKg(totalKg: number | null) {
   }
 
   if (totalKg >= 3000) {
-    return 0.4;
+    return 0.35;
   }
 
   if (totalKg >= 1500) {
-    return 0.5;
+    return 0.4;
   }
 
   if (totalKg >= 1200) {
-    return 0.55;
+    return 0.45;
   }
 
   if (totalKg >= 900) {
-    return 0.6;
+    return 0.5;
   }
 
   if (totalKg >= 600) {
-    return 0.65;
+    return 0.55;
   }
 
-  return 0.7;
+  return 0.6;
 }
 
 function getIngredientPrice(
@@ -937,30 +950,23 @@ function buildPreview(
   const customMoldLeadTimeNote = values.custom_mold
     ? "Custom mold selected. Add 8+ weeks for mold development and approval."
     : "Standard shape or existing mold selected.";
-  const overheadPerGram = 0.0048;
-  const overheadPerGummy =
-    gummyWeightG === null ? null : gummyWeightG * overheadPerGram;
   const baseSystemEstimate = baseSystemEstimates[values.base_type] ?? {
     multiplier: 1,
     pectin_component_usd_per_kg: 15,
+    base_cost_cents_per_g: 0.3,
   };
+  const baseCostCentsPerG = baseSystemEstimate.base_cost_cents_per_g;
+  const baseSystemCostPerGummy =
+    gummyWeightG === null ? null : (gummyWeightG * baseCostCentsPerG) / 100;
   const extraActiveFeePerGummy =
     activeCount > 3 ? (activeCount - 3) * 0.001 : 0;
   const activeCostPerGummyForPricing = totalRawActiveCostPerGummy ?? 0;
-  const unadjustedBaseCostPerGummy =
-    overheadPerGummy === null
+  const baseCostPerGummy =
+    baseSystemCostPerGummy === null
       ? null
       : activeCostPerGummyForPricing +
-        overheadPerGummy +
+        baseSystemCostPerGummy +
         extraActiveFeePerGummy;
-  const baseCostPerGummy =
-    unadjustedBaseCostPerGummy === null
-      ? null
-      : unadjustedBaseCostPerGummy * baseSystemEstimate.multiplier;
-  const baseSystemAdjustmentPerGummy =
-    unadjustedBaseCostPerGummy === null
-      ? null
-      : unadjustedBaseCostPerGummy * (baseSystemEstimate.multiplier - 1);
   const requestedTotalKg =
     gummyWeightG !== null && requestedTotalGummies !== null
       ? (gummyWeightG * requestedTotalGummies) / 1000
@@ -972,19 +978,68 @@ function buildPreview(
     gummyWeightG !== null && appliedTotalKg !== null
       ? Math.ceil((appliedTotalKg * 1000) / gummyWeightG)
       : null;
-  const margin = getMarginForKg(appliedTotalKg);
+  const grossMargin = getMarginForKg(appliedTotalKg);
   const estimatedTotalCost =
     baseCostPerGummy !== null && pricedTotalGummies !== null
       ? baseCostPerGummy * pricedTotalGummies
       : null;
-  const finalPrice =
-    estimatedTotalCost !== null && margin !== null
-      ? estimatedTotalCost * (1 + margin)
+  const calculatedPrice =
+    estimatedTotalCost !== null && grossMargin !== null
+      ? estimatedTotalCost / (1 - grossMargin)
       : null;
+  const floorBaseCentsPerGummy =
+    gummyWeightG === null ? null : Math.max(2.5, gummyWeightG * 0.9);
+  const floorSugarProfileAddition =
+    values.base_type === "Sugar Free Pectin"
+      ? 0.5
+      : values.base_type === "Low Sugar Pectin"
+        ? 0.3
+        : 0;
+  const floorActiveComplexityAddition =
+    activeCount > 3 ? (activeCount - 3) * 0.1 : 0;
+  const floorMineralAddition = ingredientReview.mineral_heavy ? 0.3 : 0;
+  const floorOilSolubleAddition = ingredientReview.oil_soluble ? 0.3 : 0;
+  const floorRdAddition = ingredientReview.requires_rd_review ? 0.5 : 0;
+  const floorCustomMoldAddition = values.custom_mold ? 0.2 : 0;
+  const floorRushAddition = values.rush ? 0.3 : 0;
+  const floorPriceCentsPerGummy =
+    floorBaseCentsPerGummy === null
+      ? null
+      : floorBaseCentsPerGummy +
+        floorSugarProfileAddition +
+        floorActiveComplexityAddition +
+        floorMineralAddition +
+        floorOilSolubleAddition +
+        floorRdAddition +
+        floorCustomMoldAddition +
+        floorRushAddition;
+  const floorPriceUsdPerGummy =
+    floorPriceCentsPerGummy === null ? null : floorPriceCentsPerGummy / 100;
+  const floorTotalPrice =
+    floorPriceUsdPerGummy !== null && pricedTotalGummies !== null
+      ? floorPriceUsdPerGummy * pricedTotalGummies
+      : null;
+  const floorProtectionApplied =
+    calculatedPrice !== null &&
+    floorTotalPrice !== null &&
+    calculatedPrice < floorTotalPrice;
+  const protectedFinalPrice =
+    calculatedPrice !== null && floorTotalPrice !== null
+      ? Math.max(calculatedPrice, floorTotalPrice)
+      : calculatedPrice;
+  const finalPrice = hasVendorQuoteIngredientCosts ? null : protectedFinalPrice;
   const estimatedPricePerGummy =
     finalPrice !== null && pricedTotalGummies !== null && pricedTotalGummies > 0
       ? finalPrice / pricedTotalGummies
       : null;
+  const calculatedPricePerGummy =
+    calculatedPrice !== null &&
+    pricedTotalGummies !== null &&
+    pricedTotalGummies > 0
+      ? calculatedPrice / pricedTotalGummies
+      : null;
+  const finalPriceCentsPerGummy =
+    estimatedPricePerGummy === null ? null : estimatedPricePerGummy * 100;
   const bottlePackagingLaborPerUnit = isBulkPackaging ? 0 : 1;
   const estimatedPricePerBottle =
     isBulkPackaging
@@ -1009,9 +1064,9 @@ function buildPreview(
     finalPrice !== null && estimatedBottlePackagingLaborCost !== null
       ? finalPrice + estimatedBottlePackagingLaborCost
       : null;
-  const overheadCost =
-    overheadPerGummy !== null && pricedTotalGummies !== null
-      ? overheadPerGummy * pricedTotalGummies
+  const baseSystemCost =
+    baseSystemCostPerGummy !== null && pricedTotalGummies !== null
+      ? baseSystemCostPerGummy * pricedTotalGummies
       : null;
   const activeCost =
     activeCount === 0 || pricedIngredientCount === 0
@@ -1077,23 +1132,42 @@ function buildPreview(
       base_system_multiplier: baseSystemEstimate.multiplier,
       base_system_pectin_component_usd_per_kg:
         baseSystemEstimate.pectin_component_usd_per_kg,
-      overhead_per_gram: overheadPerGram,
-      overhead_per_gummy: overheadPerGummy,
+      base_cost_cents_per_g: baseCostCentsPerG,
+      base_system_cost_per_gummy_usd: baseSystemCostPerGummy,
+      overhead_per_gram: null,
+      overhead_per_gummy: null,
       active_count: activeCount,
       priced_ingredient_count: pricedIngredientCount,
       extra_active_fee_per_gummy: extraActiveFeePerGummy,
       active_cost_per_gummy: totalRawActiveCostPerGummy,
-      unadjusted_base_cost_per_gummy: unadjustedBaseCostPerGummy,
-      base_system_adjustment_per_gummy: baseSystemAdjustmentPerGummy,
+      unadjusted_base_cost_per_gummy: baseCostPerGummy,
+      base_system_adjustment_per_gummy: 0,
       base_cost_per_gummy: baseCostPerGummy,
       requested_total_gummies: requestedTotalGummies,
       requested_total_kg: requestedTotalKg,
       moq_applied: moqApplied,
       applied_total_kg: appliedTotalKg,
       adjusted_total_gummies: pricedTotalGummies,
-      margin,
+      pricing_total_gummies: pricedTotalGummies,
+      gross_margin: grossMargin,
+      margin: grossMargin,
       total_cost: estimatedTotalCost,
+      calculated_price: calculatedPrice,
+      calculated_price_per_gummy: calculatedPricePerGummy,
+      floor_base_cents_per_gummy: floorBaseCentsPerGummy,
+      floor_price_cents_per_gummy: floorPriceCentsPerGummy,
+      floor_price_usd_per_gummy: floorPriceUsdPerGummy,
+      floor_total_price: floorTotalPrice,
+      floor_protection_applied: floorProtectionApplied,
+      floor_protection_status: floorProtectionApplied
+        ? "Floor price protection applied. Calculated price was below minimum acceptable price."
+        : "Floor price protection not triggered.",
+      protected_final_price_estimate: protectedFinalPrice,
       final_price: finalPrice,
+      final_price_status: hasVendorQuoteIngredientCosts
+        ? "Vendor quote required"
+        : "Estimated only",
+      final_price_cents_per_gummy: finalPriceCentsPerGummy,
       estimated_price_per_gummy: estimatedPricePerGummy,
       order_quantity_units: validQuantity,
       gummies_per_unit: validCountPerUnit,
@@ -1108,7 +1182,8 @@ function buildPreview(
       estimated_final_price_with_bottle_packaging:
         estimatedFinalPriceWithBottles,
       active_cost: activeCost,
-      overhead_cost: overheadCost,
+      overhead_cost: baseSystemCost,
+      base_system_cost: baseSystemCost,
       complexity_fee: complexityFee,
       rd_fee: rdFee,
       mold_cost: moldCost,
@@ -1117,7 +1192,9 @@ function buildPreview(
       active_cost_fallback_message: activeCostFallbackMessage,
       pricing_data_complete: pricingDataComplete,
       pricing_note:
-        "Estimated only. Not a final commercial quote. Excludes final procurement confirmation, testing, freight, taxes, yield adjustment, and commercial approval.",
+        hasVendorQuoteIngredientCosts
+          ? "One or more ingredients require vendor pricing. Final quote cannot be auto-calculated."
+          : "Estimated only. Not a final commercial quote. Excludes final procurement confirmation, testing, freight, taxes, yield adjustment, and commercial approval.",
     },
     cost_per_gummy: estimatedPricePerGummy,
     cost_per_serving:
@@ -1127,7 +1204,8 @@ function buildPreview(
     price_per_bottle: estimatedPricePerBottle,
     total_cost: estimatedTotalCost,
     final_price: finalPrice,
-    margin,
+    margin: grossMargin,
+    gross_margin: grossMargin,
     rd_fee: rdFee,
     mold_cost: moldCost,
   };
@@ -1474,9 +1552,11 @@ export default function GummiesQuotePage() {
         price_per_bottle: preview.price_per_bottle,
         total_cost: preview.total_cost,
         final_price: preview.final_price,
+        gross_margin: preview.gross_margin,
         margin: preview.margin,
         rd_fee: preview.rd_fee,
         mold_cost: preview.mold_cost,
+        pricing_preview: preview.pricing_engine,
         active_ingredients: normalizedIngredients,
         active_ingredient_review: getIngredientReviewData(
           ingredients,
@@ -1992,21 +2072,31 @@ export default function GummiesQuotePage() {
           <div className="mt-6 grid gap-4">
             <PricingQuoteCard
               label="Estimated Price Per Gummy (¢)"
-              value={formatMainPricingValueWith(
-                preview.pricing_engine.estimated_price_per_gummy,
-                preview.pricing_engine.active_count,
-                formatPerGummyPrice,
-              )}
-              note={getMainPricingNote(
-                preview.pricing_engine.active_count,
-                "Total price is calculated using precise unit cost × total gummies. Estimated only. Includes active cost, gummy overhead, active complexity fee, and applied margin.",
-              )}
+              value={
+                preview.pricing_engine.vendor_quote_required
+                  ? "Vendor quote required"
+                  : formatMainPricingValueWith(
+                      preview.pricing_engine.estimated_price_per_gummy,
+                      preview.pricing_engine.active_count,
+                      formatPerGummyPrice,
+                    )
+              }
+              note={
+                preview.pricing_engine.vendor_quote_required
+                  ? "One or more ingredients require vendor pricing. Final quote cannot be auto-calculated."
+                  : getMainPricingNote(
+                      preview.pricing_engine.active_count,
+                      "Total price is calculated using precise unit cost × total gummies. Estimated only. Includes active cost, base gummy system cost, active complexity fee, floor protection, and gross margin.",
+                    )
+              }
             />
             <PricingQuoteCard
               label="Estimated Price Per Bottle"
               value={
                 preview.pricing_engine.bulk_packaging_selected
                   ? "N/A for bulk"
+                  : preview.pricing_engine.vendor_quote_required
+                    ? "Vendor quote required"
                   : formatMainPricingValue(
                       preview.pricing_engine.estimated_price_per_bottle,
                       preview.pricing_engine.active_count,
@@ -2015,6 +2105,8 @@ export default function GummiesQuotePage() {
               note={
                 preview.pricing_engine.bulk_packaging_selected
                   ? "Bulk packaging selected. Bottle, cap, and bottle labor are not added."
+                  : preview.pricing_engine.vendor_quote_required
+                    ? "One or more ingredients require vendor pricing. Bottle estimate cannot be auto-calculated."
                   : getMainPricingNote(
                       preview.pricing_engine.active_count,
                       "Estimated only. Includes gummies per bottle plus $1.00 bottle, cap, and labor charge.",
@@ -2023,15 +2115,23 @@ export default function GummiesQuotePage() {
             />
             <PreviewItem
               label="Cost Per Serving"
-              value={formatMainPricingValueWith(
-                preview.cost_per_serving,
-                preview.pricing_engine.active_count,
-                formatServingPrice,
-              )}
-              note={getMainPricingNote(
-                preview.pricing_engine.active_count,
-                "Total price is calculated using precise unit cost × total gummies. Estimated only.",
-              )}
+              value={
+                preview.pricing_engine.vendor_quote_required
+                  ? "Vendor quote required"
+                  : formatMainPricingValueWith(
+                      preview.cost_per_serving,
+                      preview.pricing_engine.active_count,
+                      formatServingPrice,
+                    )
+              }
+              note={
+                preview.pricing_engine.vendor_quote_required
+                  ? "One or more ingredients require vendor pricing."
+                  : getMainPricingNote(
+                      preview.pricing_engine.active_count,
+                      "Total price is calculated using precise unit cost × total gummies. Estimated only.",
+                    )
+              }
             />
             <PreviewItem
               label="Estimated Total Cost"
@@ -2044,7 +2144,7 @@ export default function GummiesQuotePage() {
                 preview.pricing_engine.active_count === 0
                   ? "Add active ingredients and order quantity to generate estimate."
                   : preview.pricing_engine.moq_applied
-                  ? `Estimated only. 300kg MOQ applied from ${formatKg(
+                  ? `Minimum order quantity is 300kg. Pricing is calculated at 300kg MOQ. Requested weight: ${formatKg(
                       preview.pricing_engine.requested_total_kg,
                     )}.`
                   : "Estimated only. Uses requested gummy count."
@@ -2052,21 +2152,31 @@ export default function GummiesQuotePage() {
             />
             <PreviewItem
               label="Estimated Total Price"
-              value={formatMainPricingValueWith(
-                preview.pricing_engine.final_price,
-                preview.pricing_engine.active_count,
-                formatTotalPrice,
-              )}
-              note={getMainPricingNote(
-                preview.pricing_engine.active_count,
-                "Total price is calculated using precise unit cost × total gummies. Estimated only. Commercial quote still requires review.",
-              )}
+              value={
+                preview.pricing_engine.vendor_quote_required
+                  ? "Vendor quote required"
+                  : formatMainPricingValueWith(
+                      preview.pricing_engine.final_price,
+                      preview.pricing_engine.active_count,
+                      formatTotalPrice,
+                    )
+              }
+              note={
+                preview.pricing_engine.vendor_quote_required
+                  ? "One or more ingredients require vendor pricing. Final quote cannot be auto-calculated."
+                  : getMainPricingNote(
+                      preview.pricing_engine.active_count,
+                      "Price is calculated as total cost / (1 - gross margin), then protected by the floor price when required.",
+                    )
+              }
             />
             <PreviewItem
               label="Estimated Bottle-Included Total"
               value={
                 preview.pricing_engine.bulk_packaging_selected
                   ? "N/A for bulk"
+                  : preview.pricing_engine.vendor_quote_required
+                    ? "Vendor quote required"
                   : formatMainPricingValueWith(
                       preview.pricing_engine
                         .estimated_final_price_with_bottle_packaging,
@@ -2077,6 +2187,8 @@ export default function GummiesQuotePage() {
               note={
                 preview.pricing_engine.bulk_packaging_selected
                   ? "Bulk packaging selected. No bottle, cap, or bottle labor charge added."
+                  : preview.pricing_engine.vendor_quote_required
+                    ? "One or more ingredients require vendor pricing."
                   : getMainPricingNote(
                       preview.pricing_engine.active_count,
                       "Estimated only. Adds $1.00 per bottle for bottle, cap, and labor.",
@@ -2098,9 +2210,9 @@ export default function GummiesQuotePage() {
               note="Calculated from gummy weight and total gummies before MOQ adjustment."
             />
             <PreviewItem
-              label="Applied Margin"
-              value={formatPercent(preview.pricing_engine.margin)}
-              note={`Estimated only. Pricing weight: ${formatKg(
+              label="Gross Margin"
+              value={formatPercent(preview.pricing_engine.gross_margin)}
+              note={`Price is calculated as total cost / (1 - gross margin). Pricing weight: ${formatKg(
                 preview.pricing_engine.applied_total_kg,
               )}.`}
             />
@@ -2124,19 +2236,81 @@ export default function GummiesQuotePage() {
               />
             ) : null}
             <PreviewItem
-              label="Overhead Cost"
+              label="Base Gummy System Cost"
               value={formatCurrencyWithFallback(
                 preview.pricing_engine.overhead_cost,
-                "Select gummy weight and quantity to estimate overhead.",
+                "Select gummy weight and quantity to estimate base system cost.",
               )}
-              note="Estimated only. Uses $0.0048 per gram per gummy."
+              note={`Estimated only. Uses ${preview.pricing_engine.base_cost_cents_per_g} cents per gram for ${preview.pricing_engine.base_type || "Pectin"}.`}
             />
             <PreviewItem
-              label="Base System Adjustment"
-              value={`${preview.pricing_engine.base_system_multiplier.toFixed(
-                2,
-              )}x`}
-              note={`Estimated only. ${preview.pricing_engine.base_type || "Pectin"} uses a pectin component estimate of $${preview.pricing_engine.base_system_pectin_component_usd_per_kg}/kg.`}
+              label="Base Cost Per Gummy"
+              value={formatPerGummyPrice(
+                preview.pricing_engine.base_system_cost_per_gummy_usd,
+              )}
+              note="Calculated as gummy weight × base cost cents per gram."
+            />
+            <PreviewItem
+              label="Calculated Price"
+              value={formatMainPricingValueWith(
+                preview.pricing_engine.calculated_price,
+                preview.pricing_engine.active_count,
+                formatTotalPrice,
+              )}
+              note="Price before floor protection. Price is calculated as total cost / (1 - gross margin)."
+            />
+            <PreviewItem
+              label="Calculated Unit Price Before Floor"
+              value={formatMainPricingValueWith(
+                preview.pricing_engine.calculated_price_per_gummy,
+                preview.pricing_engine.active_count,
+                formatPerGummyPrice,
+              )}
+              note="Shown for transparency before floor price protection."
+            />
+            <PreviewItem
+              label="Floor Price"
+              value={formatMainPricingValueWith(
+                preview.pricing_engine.floor_total_price,
+                preview.pricing_engine.active_count,
+                formatTotalPrice,
+              )}
+              note="Minimum acceptable selling price for this configuration."
+            />
+            <PreviewItem
+              label="Floor Unit Price"
+              value={formatMainPricingValueWith(
+                preview.pricing_engine.floor_price_usd_per_gummy,
+                preview.pricing_engine.active_count,
+                formatPerGummyPrice,
+              )}
+              note={`Floor base: ${preview.pricing_engine.floor_base_cents_per_gummy?.toFixed(4) ?? "not enough data"} cents per gummy.`}
+            />
+            <PreviewItem
+              label="Final Protected Price"
+              value={
+                preview.pricing_engine.vendor_quote_required
+                  ? "Vendor quote required"
+                  : formatMainPricingValueWith(
+                      preview.pricing_engine.final_price,
+                      preview.pricing_engine.active_count,
+                      formatTotalPrice,
+                    )
+              }
+              note={
+                preview.pricing_engine.vendor_quote_required
+                  ? "One or more ingredients require vendor pricing. Final quote cannot be auto-calculated."
+                  : "Final price is the higher of calculated price and floor price."
+              }
+            />
+            <PreviewItem
+              label="Floor Protection Status"
+              value={preview.pricing_engine.floor_protection_status}
+              note={
+                preview.pricing_engine.floor_protection_applied
+                  ? "Floor price protection applied. Calculated price was below minimum acceptable price."
+                  : "Floor price protection not triggered."
+              }
             />
             <PreviewItem
               label="Complexity Fee"
