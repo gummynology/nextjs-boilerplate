@@ -27,15 +27,20 @@ export function FieldLabel({
   children,
   fullWidth = false,
   note,
+  required = false,
 }: {
   label: string;
   children: ReactNode;
   fullWidth?: boolean;
   note?: string;
+  required?: boolean;
 }) {
   return (
     <label className={fullWidth ? "sm:col-span-2" : ""}>
-      <span className={labelClass}>{label}</span>
+      <span className={labelClass}>
+        {label}
+        {required ? <span className="ml-1 text-red-600">*</span> : null}
+      </span>
       {children}
       {note ? <span className="mt-2 block text-sm text-zinc-600">{note}</span> : null}
     </label>
