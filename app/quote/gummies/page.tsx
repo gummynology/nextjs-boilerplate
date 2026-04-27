@@ -203,15 +203,20 @@ function OptionGroup({
   options,
   value,
   onChange,
+  required = false,
 }: {
   label: string;
   options: string[];
   value: string;
   onChange: (value: string) => void;
+  required?: boolean;
 }) {
   return (
     <div className="sm:col-span-2">
-      <p className="text-sm font-semibold text-zinc-800">{label}</p>
+      <p className="text-sm font-semibold text-zinc-800">
+        {label}
+        {required ? <span className="ml-1 text-red-600">*</span> : null}
+      </p>
       <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {options.map((option) => {
           const isSelected = value === option;
@@ -243,6 +248,7 @@ function SelectField({
   onChange,
   disabled = false,
   placeholder = "Select",
+  required = true,
 }: {
   label: string;
   value: string;
@@ -250,11 +256,12 @@ function SelectField({
   onChange: (value: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  required?: boolean;
 }) {
   return (
-    <FieldLabel label={label}>
+    <FieldLabel label={label} required={required}>
       <select
-        required
+        required={required}
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
@@ -616,6 +623,38 @@ function getIngredientCostPerServing(
   return (amountMg / 1_000_000) * price.price_per_kg_usd;
 }
 
+function getServingDivisor(recommendedServingSize: string) {
+  if (recommendedServingSize === "1 gummy") {
+    return 1;
+  }
+
+  if (recommendedServingSize === "2 gummies") {
+    return 2;
+  }
+
+  if (recommendedServingSize === "3 gummies") {
+    return 3;
+  }
+
+  return 4;
+}
+
+function formatIngredientPricePerKg(price: number | null | undefined) {
+  if (price === null || price === undefined) {
+    return null;
+  }
+
+  return `$${Number(price.toFixed(price >= 100 ? 0 : 2))}/kg`;
+}
+
+function formatIngredientCostPerGummy(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return `${(value * 100).toFixed(4)}¢ / gummy`;
+}
+
 function containsDifficultTerms(ingredients: ActiveIngredient[], notes: string) {
   const searchable = [
     ...ingredients.map(
@@ -714,14 +753,7 @@ function buildPreview(
           : totalActiveMgPerServing <= 750
             ? "3 gummies"
             : "4+ gummies";
-  const servingDivisor =
-    recommendedServingSize === "1 gummy"
-      ? 1
-      : recommendedServingSize === "2 gummies"
-        ? 2
-        : recommendedServingSize === "3 gummies"
-          ? 3
-          : 4;
+  const servingDivisor = getServingDivisor(recommendedServingSize);
   const activeMgPerGummy =
     totalActiveMgPerServing === null
       ? null
@@ -746,6 +778,7 @@ function buildPreview(
       );
 
       return {
+        ingredient_id: ingredient.id,
         ingredient_name: ingredient.ingredient_name.trim(),
         matched_ingredient_name: definition?.name ?? null,
         customer_supplied: ingredient.customer_supplied,
@@ -1412,13 +1445,7 @@ export default function GummiesQuotePage() {
             estimatedRawCostPerServing === null
               ? null
               : estimatedRawCostPerServing /
-                (preview.recommended_serving_size === "1 gummy"
-                  ? 1
-                  : preview.recommended_serving_size === "2 gummies"
-                    ? 2
-                    : preview.recommended_serving_size === "3 gummies"
-                      ? 3
-                      : 4),
+                getServingDivisor(preview.recommended_serving_size),
           ingredient_library_notes: definition?.notes ?? null,
         };
       });
@@ -1499,7 +1526,7 @@ export default function GummiesQuotePage() {
           ) : null}
 
           <QuoteSection title="Product Basics">
-            <FieldLabel label="Product Name">
+            <FieldLabel label="Product Name" required>
               <input
                 required
                 type="text"
@@ -1511,7 +1538,7 @@ export default function GummiesQuotePage() {
                 placeholder="Example: Sleep Support Gummy"
               />
             </FieldLabel>
-            <FieldLabel label="Project Name">
+            <FieldLabel label="Project Name" required>
               <input
                 required
                 type="text"
@@ -1544,6 +1571,7 @@ export default function GummiesQuotePage() {
               value={values.base_type}
               options={baseTypeOptions}
               onChange={(value) => updateField("base_type", value)}
+              required
             />
           </QuoteSection>
 
@@ -1575,13 +1603,19 @@ export default function GummiesQuotePage() {
 
           <QuoteSection title="Active Ingredient Builder">
             <div className="sm:col-span-2">
-              <div className="hidden gap-3 border-b border-zinc-200 pb-2 text-xs font-semibold tracking-[0.12em] text-zinc-500 uppercase lg:grid lg:grid-cols-[1.25fr_0.72fr_0.52fr_0.72fr_1.35fr_0.45fr]">
-                <span>Ingredient</span>
-                <span>Amount</span>
-                <span>Unit</span>
+              <div className="hidden gap-3 border-b border-zinc-200 pb-2 text-xs font-semibold tracking-[0.12em] text-zinc-500 uppercase lg:grid lg:grid-cols-[28fr_12fr_10fr_12fr_22fr_16fr]">
+                <span>
+                  Ingredient <span className="text-red-600">*</span>
+                </span>
+                <span>
+                  Amount <span className="text-red-600">*</span>
+                </span>
+                <span>
+                  Unit <span className="text-red-600">*</span>
+                </span>
                 <span>Supplied</span>
                 <span>Notes</span>
-                <span>Action</span>
+                <span>Price Info</span>
               </div>
               <div className="mt-3 grid gap-3">
                 {ingredients.map((ingredient, index) => {
@@ -1589,6 +1623,20 @@ export default function GummiesQuotePage() {
                     ingredient.ingredient_name,
                     ingredientDefinitions,
                   );
+                  const ingredientCostLine = preview.ingredient_cost_lines.find(
+                    (line) => line.ingredient_id === ingredient.id,
+                  );
+                  const pricePerKg = formatIngredientPricePerKg(
+                    ingredientCostLine?.price_per_kg_usd,
+                  );
+                  const costPerGummy = formatIngredientCostPerGummy(
+                    ingredientCostLine?.estimated_raw_cost_per_gummy,
+                  );
+                  const needsVendorQuote =
+                    ingredientCostLine?.vendor_quote_required === true;
+                  const hasIngredientInput =
+                    ingredient.ingredient_name.trim() ||
+                    ingredient.amount_per_serving.trim();
 
                   return (
                     <div
@@ -1599,19 +1647,12 @@ export default function GummiesQuotePage() {
                         <h3 className="text-sm font-semibold text-zinc-950">
                           Ingredient {index + 1}
                         </h3>
-                        <button
-                          type="button"
-                          onClick={() => removeIngredient(ingredient.id)}
-                          disabled={ingredients.length === 1}
-                          className="inline-flex min-h-10 items-center justify-center rounded-sm border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-red-700 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          Remove
-                        </button>
                       </div>
-                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.25fr_0.72fr_0.52fr_0.72fr_1.35fr_0.45fr] lg:items-end">
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[28fr_12fr_10fr_12fr_22fr_16fr] lg:items-end">
                         <label>
                           <span className="text-xs font-semibold text-zinc-700 lg:hidden">
                             Ingredient
+                            <span className="ml-1 text-red-600">*</span>
                           </span>
                           <IngredientSearchField
                             ingredient={ingredient}
@@ -1650,6 +1691,7 @@ export default function GummiesQuotePage() {
                         <label>
                           <span className="text-xs font-semibold text-zinc-700 lg:hidden">
                             Amount
+                            <span className="ml-1 text-red-600">*</span>
                           </span>
                           <input
                             type="number"
@@ -1670,6 +1712,7 @@ export default function GummiesQuotePage() {
                         <label>
                           <span className="text-xs font-semibold text-zinc-700 lg:hidden">
                             Unit
+                            <span className="ml-1 text-red-600">*</span>
                           </span>
                           <select
                             value={ingredient.unit}
@@ -1727,13 +1770,38 @@ export default function GummiesQuotePage() {
                             placeholder="Source, taste, solubility, stability"
                           />
                         </label>
+                        <div className="sm:col-span-2 lg:col-span-1">
+                          <span className="text-xs font-semibold text-zinc-700 lg:hidden">
+                            Price Info
+                          </span>
+                          <div className="mt-2 min-h-11 rounded-sm border border-zinc-200 bg-white px-3 py-2 text-xs leading-5 text-zinc-600 lg:mt-0">
+                            {needsVendorQuote ? (
+                              <p className="font-semibold text-amber-800">
+                                Warning: Vendor quote required
+                              </p>
+                            ) : hasIngredientInput && !pricePerKg ? (
+                              <p className="font-semibold text-amber-800">
+                                Warning: No price available
+                              </p>
+                            ) : (
+                              <>
+                                <p className="font-semibold text-zinc-950">
+                                  {pricePerKg ?? "$0/kg"}
+                                </p>
+                                <p>{costPerGummy ?? "0.0000¢ / gummy"}</p>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex justify-end">
                         <button
                           type="button"
                           onClick={() => removeIngredient(ingredient.id)}
                           disabled={ingredients.length === 1}
-                          className="hidden min-h-12 items-center justify-center rounded-sm border border-zinc-300 bg-white px-3 py-3 text-sm font-semibold text-zinc-800 transition hover:border-red-700 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40 lg:inline-flex"
+                          className="inline-flex min-h-9 items-center justify-center rounded-sm border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:border-red-700 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40"
                         >
-                          Remove
+                          Remove ingredient
                         </button>
                       </div>
                       {matchedIngredient ? (
@@ -1781,7 +1849,7 @@ export default function GummiesQuotePage() {
               onChange={(value) => updateField("packaging_type", value)}
             />
             {values.packaging_type !== "Bulk" ? (
-              <FieldLabel label="Gummies Per Unit">
+              <FieldLabel label="Gummies Per Unit" required>
                 <input
                   required
                   min="1"
@@ -1821,6 +1889,7 @@ export default function GummiesQuotePage() {
                   ? "Order Quantity (Total Gummies)"
                   : "Order Quantity (Number of Units)"
               }
+              required
             >
               <input
                 required
@@ -1833,7 +1902,7 @@ export default function GummiesQuotePage() {
                 className={fieldClass}
               />
             </FieldLabel>
-            <FieldLabel label="Target Launch Date">
+            <FieldLabel label="Target Launch Date" required>
               <input
                 required
                 type="date"
