@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   findActiveIngredient,
   getUniqueActiveIngredients,
@@ -9,17 +11,19 @@ import {
   type ActiveIngredientDefinition,
   type IngredientUnit,
 } from "@/lib/activeIngredients";
-import { generateQuotationNumber } from "@/lib/quoteManagement";
+import {
+  ADMIN_SESSION_KEY,
+  INTERNAL_QUOTE_CUSTOMER_KEY,
+  InternalQuoteCustomer,
+  generateQuotationNumber,
+} from "@/lib/quoteManagement";
 import { getSupabaseClient } from "@/lib/supabaseClient";
-import QuoteAccessShell, {
-  getStoredCustomerContext,
-} from "../_components/QuoteAccessShell";
 import {
   CheckboxField,
   FieldLabel,
   QuoteSection,
   fieldClass,
-} from "../_components/QuoteField";
+} from "../../../quote/_components/QuoteField";
 
 type ActiveIngredient = {
   id: string;
@@ -1197,6 +1201,16 @@ function buildPreview(
 }
 
 export default function GummiesQuotePage() {
+  const router = useRouter();
+  const [isCheckingAdminAccess, setIsCheckingAdminAccess] = useState(true);
+  const [customer, setCustomer] = useState<InternalQuoteCustomer>({
+    company_name: "",
+    contact_name: "",
+    email: "",
+    phone: "",
+    address: "",
+    quotation_number: "",
+  });
   const [values, setValues] = useState<GummiesFormValues>(initialValues);
   const [ingredients, setIngredients] = useState<ActiveIngredient[]>([
     createIngredient(),
@@ -1228,6 +1242,53 @@ export default function GummiesQuotePage() {
   const availableWeightOptions = values.shape
     ? (weightOptionsByShape[values.shape] ?? ["Custom"])
     : [];
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const hasAdminSession =
+        window.localStorage.getItem(ADMIN_SESSION_KEY) === "authenticated";
+
+      if (!hasAdminSession) {
+        router.replace("/admin-login");
+        return;
+      }
+
+      const storedCustomer = window.localStorage.getItem(
+        INTERNAL_QUOTE_CUSTOMER_KEY,
+      );
+
+      if (storedCustomer) {
+        try {
+          const parsedCustomer = JSON.parse(
+            storedCustomer,
+          ) as InternalQuoteCustomer;
+          setCustomer({
+            company_name: parsedCustomer.company_name || "",
+            contact_name: parsedCustomer.contact_name || "",
+            email: parsedCustomer.email || "",
+            phone: parsedCustomer.phone || "",
+            address: parsedCustomer.address || "",
+            quotation_number:
+              parsedCustomer.quotation_number || generateQuotationNumber(),
+          });
+        } catch {
+          setCustomer((current) => ({
+            ...current,
+            quotation_number: generateQuotationNumber(),
+          }));
+        }
+      } else {
+        setCustomer((current) => ({
+          ...current,
+          quotation_number: generateQuotationNumber(),
+        }));
+      }
+
+      setIsCheckingAdminAccess(false);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [router]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1458,8 +1519,16 @@ export default function GummiesQuotePage() {
       return;
     }
 
-    const { customerCompany, customerEmail } = getStoredCustomerContext();
-    const quotationNumber = generateQuotationNumber();
+    if (!customer.company_name.trim() || !customer.email.trim()) {
+      setSubmitError(
+        "Customer company name and email are required for internal quotes.",
+      );
+      return;
+    }
+
+    const quotationNumber =
+      customer.quotation_number || generateQuotationNumber();
+
     setIsSubmitting(true);
 
     const normalizedIngredients = ingredients
@@ -1516,20 +1585,28 @@ export default function GummiesQuotePage() {
 
     const { error } = await supabase.from("quote_requests").insert({
       quotation_number: quotationNumber,
-      source: "customer_portal",
+      source: "internal_sales",
       dosage_form: "gummies",
       product_name: values.product_name.trim(),
       project_name: values.project_name.trim(),
-      customer_email: customerEmail,
-      company_name: customerCompany,
-      status: "new",
+      customer_email: customer.email.trim(),
+      company_name: customer.company_name.trim(),
+      contact_name: customer.contact_name.trim(),
+      phone: customer.phone.trim(),
+      address: customer.address.trim(),
+      status: "draft",
       estimated_total_price: preview.pricing_engine.final_price,
       estimated_unit_price_cents:
         preview.pricing_engine.final_price_cents_per_gummy,
       module_data: {
         ...values,
         quotation_number: quotationNumber,
-        source: "customer_portal",
+        source: "internal_sales",
+        customer_company_name: customer.company_name.trim(),
+        contact_name: customer.contact_name.trim(),
+        customer_email: customer.email.trim(),
+        phone: customer.phone.trim(),
+        address: customer.address.trim(),
         product_name: values.product_name.trim(),
         project_name: values.project_name.trim(),
         count_per_unit:
@@ -1570,15 +1647,65 @@ export default function GummiesQuotePage() {
 
     setValues(initialValues);
     setIngredients([createIngredient()]);
+    setCustomer((current) => ({
+      ...current,
+      quotation_number: generateQuotationNumber(),
+    }));
     setSubmitted(true);
   }
 
+  if (isCheckingAdminAccess) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f7f6f1] px-5 text-zinc-950">
+        <div className="w-full max-w-md border border-zinc-200 bg-white p-8 text-center shadow-sm">
+          <p className="text-sm font-semibold tracking-[0.18em] text-emerald-800 uppercase">
+            Admin Access
+          </p>
+          <h1 className="mt-4 text-2xl font-semibold text-zinc-950">
+            Checking access
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-zinc-600">
+            Redirecting to admin login if authentication is required.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <QuoteAccessShell
-      eyebrow="Gummy Configurator v2"
-      title="Configure a gummy quote request"
-      description="Build a structured gummy concept, review feasibility signals, and submit the configuration for technical and commercial review."
-    >
+    <main className="min-h-screen bg-[#f7f6f1] text-zinc-950">
+      <section className="border-b border-zinc-200 bg-white">
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-5 py-10 sm:px-8 lg:px-10 lg:py-14">
+          <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+            <div className="max-w-4xl">
+              <p className="text-sm font-semibold tracking-[0.22em] text-emerald-800 uppercase">
+                Internal Sales Quote
+              </p>
+              <h1 className="mt-5 text-4xl font-semibold leading-tight tracking-normal text-zinc-950 sm:text-5xl">
+                Internal gummies quote builder
+              </h1>
+              <p className="mt-5 max-w-3xl text-lg leading-8 text-zinc-700">
+                Build a structured internal quote with full pricing breakdown
+                for sales, R&D, purchasing, and management review.
+              </p>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Link
+                href="/admin/internal-quote"
+                className="inline-flex min-h-11 items-center justify-center rounded-sm border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-emerald-700 hover:text-emerald-800"
+              >
+                Change Customer
+              </Link>
+              <Link
+                href="/admin/customers"
+                className="inline-flex min-h-11 items-center justify-center rounded-sm border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-emerald-700 hover:text-emerald-800"
+              >
+                Customer List
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
       <section className="mx-auto grid w-full max-w-7xl items-start gap-6 px-5 py-8 sm:px-8 lg:grid-cols-[1fr_0.42fr] lg:px-10 lg:py-10">
         <form onSubmit={handleSubmit} className="grid content-start gap-5">
           {submitted ? (
@@ -1597,6 +1724,90 @@ export default function GummiesQuotePage() {
               </p>
             </div>
           ) : null}
+
+          <QuoteSection title="Customer Information">
+            <FieldLabel label="Customer Company Name" required>
+              <input
+                required
+                type="text"
+                value={customer.company_name}
+                onChange={(event) =>
+                  setCustomer((current) => ({
+                    ...current,
+                    company_name: event.target.value,
+                  }))
+                }
+                className={fieldClass}
+              />
+            </FieldLabel>
+            <FieldLabel label="Quotation Number" required>
+              <input
+                required
+                type="text"
+                value={customer.quotation_number || ""}
+                onChange={(event) =>
+                  setCustomer((current) => ({
+                    ...current,
+                    quotation_number: event.target.value,
+                  }))
+                }
+                className={fieldClass}
+              />
+            </FieldLabel>
+            <FieldLabel label="Contact Name">
+              <input
+                type="text"
+                value={customer.contact_name}
+                onChange={(event) =>
+                  setCustomer((current) => ({
+                    ...current,
+                    contact_name: event.target.value,
+                  }))
+                }
+                className={fieldClass}
+              />
+            </FieldLabel>
+            <FieldLabel label="Email" required>
+              <input
+                required
+                type="email"
+                value={customer.email}
+                onChange={(event) =>
+                  setCustomer((current) => ({
+                    ...current,
+                    email: event.target.value,
+                  }))
+                }
+                className={fieldClass}
+              />
+            </FieldLabel>
+            <FieldLabel label="Phone">
+              <input
+                type="tel"
+                value={customer.phone}
+                onChange={(event) =>
+                  setCustomer((current) => ({
+                    ...current,
+                    phone: event.target.value,
+                  }))
+                }
+                className={fieldClass}
+              />
+            </FieldLabel>
+            <FieldLabel label="Address">
+              <input
+                type="text"
+                value={customer.address}
+                onChange={(event) =>
+                  setCustomer((current) => ({
+                    ...current,
+                    address: event.target.value,
+                  }))
+                }
+                className={fieldClass}
+              />
+            </FieldLabel>
+          </QuoteSection>
 
           <QuoteSection title="Product Basics">
             <FieldLabel label="Product Name" required>
@@ -2163,10 +2374,195 @@ export default function GummiesQuotePage() {
                     )
               }
             />
+            <div className="border border-amber-200 bg-amber-50 p-4">
+              <p className="text-xs font-semibold tracking-[0.16em] text-amber-800 uppercase">
+                Internal Only Pricing Breakdown
+              </p>
+              <p className="mt-2 text-sm leading-6 text-amber-900">
+                Operational detail for sales, R&D, purchasing, and management
+                review only.
+              </p>
+            </div>
+            <PreviewItem
+              label="Gross Margin"
+              value={`${(preview.pricing_engine.gross_margin * 100).toFixed(0)}%`}
+              note="Price is calculated as total cost / (1 - gross margin)."
+            />
+            <PreviewItem
+              label="Active Cost"
+              value={formatTotalPrice(preview.pricing_engine.active_cost)}
+            />
+            <PreviewItem
+              label="Base Gummy System Cost"
+              value={formatTotalPrice(preview.pricing_engine.base_system_cost)}
+            />
+            <PreviewItem
+              label="Base Cost Per Gummy"
+              value={formatServingPrice(
+                preview.pricing_engine.base_cost_per_gummy,
+              )}
+            />
+            <PreviewItem
+              label="Overhead Cost"
+              value={formatTotalPrice(preview.pricing_engine.overhead_cost)}
+            />
+            <PreviewItem
+              label="Complexity Fee"
+              value={formatTotalPrice(preview.pricing_engine.complexity_fee)}
+            />
+            <PreviewItem
+              label="Calculated Price"
+              value={formatTotalPrice(preview.pricing_engine.calculated_price)}
+            />
+            <PreviewItem
+              label="Calculated Unit Price Before Floor"
+              value={formatPerGummyPrice(
+                preview.pricing_engine.calculated_price_per_gummy,
+              )}
+            />
+            <PreviewItem
+              label="Floor Price"
+              value={formatTotalPrice(preview.pricing_engine.floor_total_price)}
+            />
+            <PreviewItem
+              label="Floor Unit Price"
+              value={`${preview.pricing_engine.floor_price_cents_per_gummy.toFixed(
+                4,
+              )}¢`}
+            />
+            <PreviewItem
+              label="Final Protected Price"
+              value={
+                preview.pricing_engine.vendor_quote_required
+                  ? "Vendor quote required"
+                  : formatTotalPrice(preview.pricing_engine.final_price)
+              }
+            />
+            <PreviewItem
+              label="Floor Protection Status"
+              value={preview.pricing_engine.floor_protection_status}
+            />
+            <PreviewItem
+              label="R&D Fee"
+              value={formatTotalPrice(preview.pricing_engine.rd_fee)}
+            />
+            <PreviewItem
+              label="Mold Cost"
+              value={formatTotalPrice(preview.pricing_engine.mold_cost)}
+            />
+            <PreviewItem
+              label="Vendor Quote Warnings"
+              value={
+                preview.pricing_engine.vendor_quote_ingredient_names.length > 0
+                  ? preview.pricing_engine.vendor_quote_ingredient_names.join(
+                      ", ",
+                    )
+                  : "None"
+              }
+            />
+            <PreviewItem
+              label="Regulatory Review Warnings"
+              value={preview.regulatory_review_note}
+            />
+            <PreviewItem
+              label="Total Gummies"
+              value={formatCount(preview.pricing_engine.requested_total_gummies)}
+            />
+            <PreviewItem
+              label="Total Weight kg"
+              value={formatKg(preview.pricing_engine.requested_total_kg)}
+            />
+            <PreviewItem
+              label="MOQ Adjustment"
+              value={
+                preview.pricing_engine.moq_applied
+                  ? "300kg MOQ applied"
+                  : "Not applied"
+              }
+            />
+            <PreviewItem
+              label="Applied Gross Margin Tier"
+              value={`${(preview.pricing_engine.gross_margin * 100).toFixed(0)}%`}
+            />
+            <div className="border border-zinc-200 bg-zinc-50 p-4">
+              <p className="text-xs font-semibold tracking-[0.14em] text-zinc-500 uppercase">
+                Ingredient Cost Breakdown
+              </p>
+              <div className="mt-3 grid gap-3">
+                {preview.ingredient_cost_lines.length > 0 ? (
+                  preview.ingredient_cost_lines.map((line) => (
+                    <div
+                      key={`${line.ingredient_name}-${line.amount_per_serving}`}
+                      className="border border-zinc-200 bg-white p-3 text-xs leading-5 text-zinc-700"
+                    >
+                      <p className="font-semibold text-zinc-950">
+                        {line.ingredient_name}
+                      </p>
+                      <p>
+                        Amount per serving: {line.amount_per_serving}{" "}
+                        {line.unit}
+                      </p>
+                      <p>
+                        Serving size: {preview.recommended_serving_size}
+                      </p>
+                      <p>
+                        Amount per gummy:{" "}
+                        {!Number.isFinite(Number(line.amount_mg_equivalent))
+                          ? "Not available"
+                          : `${(
+                              Number(line.amount_mg_equivalent) /
+                              getServingDivisor(
+                                preview.recommended_serving_size,
+                              )
+                            ).toFixed(4)} mg`}
+                      </p>
+                      <p>
+                        Price per kg:{" "}
+                        {line.price_per_kg_usd === null
+                          ? "Vendor quote required"
+                          : `$${line.price_per_kg_usd}/kg`}
+                      </p>
+                      <p>
+                        Cost per gummy:{" "}
+                        {formatIngredientCostPerGummy(
+                          line.estimated_raw_cost_per_serving === null
+                            ? null
+                            : line.estimated_raw_cost_per_serving /
+                                getServingDivisor(
+                                  preview.recommended_serving_size,
+                                ),
+                        ) || "Vendor quote required"}
+                      </p>
+                      <p>
+                        Cost per serving:{" "}
+                        {line.estimated_raw_cost_per_serving === null
+                          ? "Vendor quote required"
+                          : formatTotalPrice(line.estimated_raw_cost_per_serving)}
+                      </p>
+                      <p>Price confidence: {line.price_confidence}</p>
+                      <p>
+                        Customer supplied:{" "}
+                        {line.customer_supplied === "yes" ? "Yes" : "No"}
+                      </p>
+                      <p>
+                        Warnings:{" "}
+                        {line.vendor_quote_required
+                          ? "Vendor quote required"
+                          : "None"}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm font-semibold text-zinc-700">
+                    Add active ingredients to show ingredient costs.
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         </aside>
       </section>
-    </QuoteAccessShell>
+    </main>
   );
 }
 

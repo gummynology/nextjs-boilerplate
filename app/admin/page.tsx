@@ -261,6 +261,18 @@ export default function AdminPage() {
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
               <Link
+                href="/admin/customers"
+                className="inline-flex min-h-11 items-center justify-center rounded-sm bg-emerald-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-900"
+              >
+                Sales Quote Management
+              </Link>
+              <Link
+                href="/admin/internal-quote"
+                className="inline-flex min-h-11 items-center justify-center rounded-sm border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-emerald-700 hover:text-emerald-800"
+              >
+                Create Internal Quote
+              </Link>
+              <Link
                 href="/admin/pricing"
                 className="inline-flex min-h-11 items-center justify-center rounded-sm border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-emerald-700 hover:text-emerald-800"
               >

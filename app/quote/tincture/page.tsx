@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { generateQuotationNumber } from "@/lib/quoteManagement";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import QuoteAccessShell, {
   getStoredCustomerContext,
@@ -107,9 +108,12 @@ export default function TinctureQuotePage() {
     }
 
     const { customerCompany, customerEmail } = getStoredCustomerContext();
+    const quotationNumber = generateQuotationNumber();
     setIsSubmitting(true);
 
     const { error } = await supabase.from("quote_requests").insert({
+      quotation_number: quotationNumber,
+      source: "customer_portal",
       dosage_form: "tincture",
       customer_email: customerEmail,
       company_name: customerCompany,
@@ -118,6 +122,8 @@ export default function TinctureQuotePage() {
       status: "new",
       module_data: {
         ...values,
+        quotation_number: quotationNumber,
+        source: "customer_portal",
         count_per_unit: Number(values.count_per_unit),
         quantity: Number(values.quantity),
       },
