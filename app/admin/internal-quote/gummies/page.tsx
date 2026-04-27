@@ -434,9 +434,13 @@ function toMg(ingredient: IngredientCostInput) {
   return null;
 }
 
-function formatCurrency(value: number | null) {
+function formatCurrency(value: number | null | undefined) {
   if (value === null) {
     return "Not enough priced mg-based data";
+  }
+
+  if (value === undefined) {
+    return "Not available";
   }
 
   if (value === 0) {
@@ -450,25 +454,40 @@ function formatCurrency(value: number | null) {
   return `$${value.toFixed(2)}`;
 }
 
-function formatCurrencyWithDecimals(value: number | null, decimals: number) {
+function formatCurrencyWithDecimals(
+  value: number | null | undefined,
+  decimals: number,
+) {
   if (value === null) {
     return "Not enough priced mg-based data";
+  }
+
+  if (value === undefined) {
+    return "Not available";
   }
 
   return `$${value.toFixed(decimals)}`;
 }
 
-function formatPerGummyPrice(value: number | null) {
+function formatPerGummyPrice(value: number | null | undefined) {
   if (value === null) {
     return "Not enough priced mg-based data";
+  }
+
+  if (value === undefined) {
+    return "Not available";
   }
 
   return `${(value * 100).toFixed(4)}¢`;
 }
 
-function formatServingPrice(value: number | null) {
+function formatServingPrice(value: number | null | undefined) {
   if (value === null) {
     return "Not enough priced mg-based data";
+  }
+
+  if (value === undefined) {
+    return "Not available";
   }
 
   return value < 1
@@ -476,8 +495,24 @@ function formatServingPrice(value: number | null) {
     : formatCurrencyWithDecimals(value, 2);
 }
 
-function formatTotalPrice(value: number | null) {
+function formatTotalPrice(value: number | null | undefined) {
   return formatCurrencyWithDecimals(value, 2);
+}
+
+function formatPercent(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "Not available";
+  }
+
+  return `${(value * 100).toFixed(0)}%`;
+}
+
+function formatCents(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "Not available";
+  }
+
+  return `${value.toFixed(4)}¢`;
 }
 
 function getActiveCostFallbackMessage({
@@ -2385,7 +2420,7 @@ export default function GummiesQuotePage() {
             </div>
             <PreviewItem
               label="Gross Margin"
-              value={`${(preview.pricing_engine.gross_margin * 100).toFixed(0)}%`}
+              value={formatPercent(preview.pricing_engine.gross_margin)}
               note="Price is calculated as total cost / (1 - gross margin)."
             />
             <PreviewItem
@@ -2426,9 +2461,9 @@ export default function GummiesQuotePage() {
             />
             <PreviewItem
               label="Floor Unit Price"
-              value={`${preview.pricing_engine.floor_price_cents_per_gummy.toFixed(
-                4,
-              )}¢`}
+              value={formatCents(
+                preview.pricing_engine.floor_price_cents_per_gummy,
+              )}
             />
             <PreviewItem
               label="Final Protected Price"
@@ -2453,10 +2488,11 @@ export default function GummiesQuotePage() {
             <PreviewItem
               label="Vendor Quote Warnings"
               value={
-                preview.pricing_engine.vendor_quote_ingredient_names.length > 0
-                  ? preview.pricing_engine.vendor_quote_ingredient_names.join(
-                      ", ",
-                    )
+                (preview.pricing_engine.vendor_quote_ingredient_names ?? [])
+                  .length > 0
+                  ? (
+                      preview.pricing_engine.vendor_quote_ingredient_names ?? []
+                    ).join(", ")
                   : "None"
               }
             />
@@ -2482,7 +2518,7 @@ export default function GummiesQuotePage() {
             />
             <PreviewItem
               label="Applied Gross Margin Tier"
-              value={`${(preview.pricing_engine.gross_margin * 100).toFixed(0)}%`}
+              value={formatPercent(preview.pricing_engine.gross_margin)}
             />
             <div className="border border-zinc-200 bg-zinc-50 p-4">
               <p className="text-xs font-semibold tracking-[0.14em] text-zinc-500 uppercase">
